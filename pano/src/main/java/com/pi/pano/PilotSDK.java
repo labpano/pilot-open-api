@@ -10,13 +10,16 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.ViewGroup;
 
+import com.pi.pano.annotation.PiProEv;
+import com.pi.pano.annotation.PiProIso;
+import com.pi.pano.annotation.PiProWb;
+import com.pi.pano.annotation.PiStitchingDistance;
 import com.pi.pilot.pano.sdk.R;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 
 /**
  * Panorama-related SDK, which can be used for panorama expansion, stitching,
@@ -32,12 +35,12 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     public static final int[] CAMERA_PREVIEW_4048_2530_30 = new int[]{4048, 2530, 30};
     public static final int[] CAMERA_PREVIEW_3520_2200_24 = new int[]{3520, 2200, 24};
-    public static final int[] CAMERA_PREVIEW_4048_2530_15 = new int[]{4048, 2530, 15};//3k 15
-    public static final int[] CAMERA_PREVIEW_4048_2530_7 = new int[]{4048, 2530, 14}; //8k 7fps
-    public static final int[] CAMERA_PREVIEW_2880_1800_15 = new int[]{2880, 1800, 15};//6k 15fps
-    public static final int[] CAMERA_PREVIEW_2192_1370_30 = new int[]{1920, 1200, 30};//4k 30fps
+    public static final int[] CAMERA_PREVIEW_4048_2530_15 = new int[]{4048, 2530, 15};
+    public static final int[] CAMERA_PREVIEW_4048_2530_7 = new int[]{4048, 2530, 14};
+    public static final int[] CAMERA_PREVIEW_2880_1800_15 = new int[]{2880, 1800, 15};
+    public static final int[] CAMERA_PREVIEW_2192_1370_30 = new int[]{1920, 1200, 30};
     public static final int[] CAMERA_PREVIEW_2192_1370_24 = new int[]{1920, 1200, 24};
-    public static final int[] CAMERA_PREVIEW_1920_1200_30 = new int[]{1920, 1200, 30};//2k 30fps
+    public static final int[] CAMERA_PREVIEW_1920_1200_30 = new int[]{1920, 1200, 30};
 
     public static final int[] CAMERA_PREVIEW_512_320_30 = new int[]{512, 320, 30};
     public static final int[] CAMERA_PREVIEW_480_300_30 = new int[]{480, 300, 30};
@@ -46,21 +49,13 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     public static final int[] CAMERA_PREVIEW_400_250_24 = new int[]{400, 250, 24};
 
-    public static final int HDR_PLUS_0 = 0;
-
-    public static final int HDR_PLUS_1 = 1;
-
-    public static final int HDR_PLUS_2 = 2;
-
-    public static final int HDR_PLUS_3 = 3;
-
     private static PilotSDK mSingle;
 
-    private CameraSurfaceView mCameraSurfaceView;
+    private final CameraSurfaceView mCameraSurfaceView;
 
-    private PanoSDKListener mPanoSDKListener;
+    private final PanoSDKListener mPanoSDKListener;
 
-    private Activity mActivity;
+    private final Activity mActivity;
 
     /**
      * Instantiate PanoSDK, You can when the Activity is created.
@@ -168,11 +163,10 @@ public class PilotSDK implements PanoSurfaceViewListener {
      *
      * @param distance The value range is -100~100, 0 is about 2m, 100 means infinity, -100 is about 0.5m
      */
-    public static void setStitchingDistance(float distance, float max) {
+    public static void setStitchingDistance(@PiStitchingDistance float distance, float max) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-
         if (distance < 0) {
             mSingle.mCameraSurfaceView.setStitchingDistance(distance / 100 * 5.0f);
         } else {
@@ -218,6 +212,32 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.setEnableTouchEvent(enable);
     }
 
+    public static void takeThumbPhoto(String filename) {
+        PiPano.clearExifThumbnailBuffer();
+
+        final Object mLock = new Object();
+        TakePhotoListener takePhotoListener = new TakePhotoListener() {
+            @Override
+            protected void onTakePhotoComplete(int errorCode) {
+                synchronized (mLock) {
+                    mLock.notifyAll();
+                }
+            }
+        };
+        takePhotoListener.mIsStitched = true;
+        takePhotoListener.mUnStitchDirPath = "/sdcard/DCIM/Thumbs/";
+        takePhotoListener.mJpegQuilty = 30;
+        takePhotoListener.mSaveExif = false;
+        mSingle.mCameraSurfaceView.takePhoto(filename, 720, 360, takePhotoListener);
+        synchronized (mLock) {
+            try {
+                mLock.wait(5000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     /**
      * Take photo
      *
@@ -231,6 +251,43 @@ public class PilotSDK implements PanoSurfaceViewListener {
         }
 
         mSingle.mCameraSurfaceView.takePhoto(filename, width, height, listener);
+    }
+
+    /**
+     * Combine multiple fisheye images into one fisheye image and expand the stitching to remove the shadow or take pictures.
+     *
+     * @param unstitchFilename   File name of the merged fisheye image
+     * @param stitchFilename     File name of the panoramic image after stitching
+     * @param fisheyeFilenames   A set of fisheye files for merging
+     * @param mask               The mask of the merging method, such as 0x0112 represents the four fisheyes of the merged fisheye image,
+     *                           and the fisheyes from left to right come from the 0th image in fisheyeFilenames Picture 1, Picture 2, Picture 2.
+     * @param makeSlamPhotoPoint (Roaming photo) Record location information
+     * @return Error code, 0 means no error
+     */
+    public static int makePanoWithMultiFisheye(String unstitchFilename, String stitchFilename, String[] fisheyeFilenames, int mask, boolean makeSlamPhotoPoint) {
+        if (checkPanoSDKNotInit()) {
+            return -1;
+        }
+        if (makeSlamPhotoPoint) {
+            String name = new File(stitchFilename).getName();
+            int index = name.lastIndexOf(".");
+            if (index > 0) {
+                name = name.substring(0, index);
+            }
+            mSingle.mCameraSurfaceView.mPiPano.makeSlamPhotoPoint(name);
+        }
+        return PiPano.makePanoWithMultiFisheye(unstitchFilename, stitchFilename, fisheyeFilenames, mask, CAMERA_COUNT);
+    }
+
+    /**
+     * Add a thumbnail to the jpeg file, the thumbnail size cannot exceed 60000 bytes, if the jpeg file originally has a thumbnail, then replace it
+     *
+     * @param jpegFilename  Jpeg file to add thumbnail
+     * @param thumbFilename The thumbnail file to be added or replaced, in jpeg format, cannot exceed 60000 bytes
+     * @return 0 means no error
+     */
+    public static int injectThumbnail(String jpegFilename, String thumbFilename) {
+        return PiPano.injectThumbnail(jpegFilename, thumbFilename);
     }
 
     /**
@@ -254,10 +311,8 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     /**
      * Adjust exposure gain
-     *
-     * @param value The range is -4 to 4. -4 is the darkest, 4 is the brightest
      */
-    public static void setExposureCompensation(int value) {
+    public static void setExposureCompensation(@PiProEv int value) {
         Log.i(TAG, "setExposureCompensation value: " + value);
 
         if (checkPanoSDKNotInit()) {
@@ -270,10 +325,8 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     /**
      * Adjust ISO
-     *
-     * @param value The range is 0~4, 0-auto 1-ISO50 2-ISO100 3-ISO200 4-ISO400 5-ISO800
      */
-    public static void setISO(int value) {
+    public static void setISO(@PiProIso int value) {
         Log.i(TAG, "setISO value: " + value);
 
         if (checkPanoSDKNotInit()) {
@@ -287,30 +340,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * Adjust manual ISO
      */
-    public static void setManualISO(int value) {
-        Log.i(TAG, "set ManualISO value: " + value);
-
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-
-        mSingle.mCameraSurfaceView.setManualISO(value);
-    }
-
-
-    public static void drawPreviewFrame(int frame) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-        mSingle.mCameraSurfaceView.drawPreviewFrame(frame);
-    }
-
-    /**
-     * Adjust white balance
-     *
-     * @param value 0-auto, 1-incandescent, 2-fluorescent, 3-daylight, 4-cloudy-daylight
-     */
-    public static void setWhiteBalance(int value) {
+    public static void setWhiteBalance(@PiProWb String value) {
         Log.i(TAG, "setWhiteBalance: " + value);
         if (checkPanoSDKNotInit()) {
             return;
@@ -332,6 +362,17 @@ public class PilotSDK implements PanoSurfaceViewListener {
     private static String mCurrentVideoFilePath = "";
 
     private static MediaRecorderUtil mMediaRecorderUtil;
+
+    /**
+     * When the preview resolution is greater than 1000, the real-time splicing video is recorded,
+     * otherwise it is recorded as four separate videos for post-processing
+     */
+    public static boolean isLargePreviewSize() {
+        if (checkPanoSDKNotInit()) {
+            return true;
+        }
+        return mSingle.mCameraSurfaceView.isLargePreviewSize();
+    }
 
     /**
      * Start recording, if the current preview resolution is greater than 1000,
@@ -367,24 +408,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
             mMediaRecorderUtil = null;
         }
 
-        final Object mLock = new Object();
-        //缩略图
-        takePhoto(filename, 720, 360,
-                new TakePhotoListener() {
-                    @Override
-                    protected void onTakePhotoComplete(int errorCode) {
-                        synchronized (mLock) {
-                            mLock.notifyAll();
-                        }
-                    }
-                });
-        synchronized (mLock) {
-            try {
-                mLock.wait(5000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
+        takeThumbPhoto(filename);
 
         if (isLargePreviewSize) {
             mCurrentVideoFilePath = (TextUtils.isEmpty(dirPath) ? "/sdcard/DCIM/Videos/Stitched/" : dirPath) + filename + ".mp4";
@@ -531,24 +555,53 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Get the current SDK version
+     * open/close roam
+     *
+     * @param enable                  open/close roam
+     * @param lenForCalMeasuringScale The distance used to calculate the scale, that is, the height of the camera from the ground when roaming
      */
-    public static String getVersion() {
-        return "1.2." + PiPano.getBuildNumber();
+    public static void setSlamEnable(boolean enable, float lenForCalMeasuringScale, SlamListener listener) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "setSlamEnable: " + enable);
+        mSingle.mCameraSurfaceView.mPiPano.setSlamEnable(enable, mSingle.mActivity.getAssets(), lenForCalMeasuringScale, listener);
+    }
+
+    public static void slamShowPreview(boolean show) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        mSingle.mCameraSurfaceView.mPiPano.slamShowPreview(show);
     }
 
     /**
-     * Set the firmware version number
+     * pause roam
      */
-    public static void setFirmware(String firmware) {
-        PiPano.setFirmware(firmware);
+    public static void slamPause() {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "slamPause");
+        mSingle.mCameraSurfaceView.mPiPano.slamPause();
+    }
+
+    /**
+     * resume roam
+     */
+    public static void slamResume() {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "slamResume");
+        mSingle.mCameraSurfaceView.mPiPano.slamResume();
     }
 
     /**
      * Get whether the jpg file is a file after optical flow stitching
      *
-     * @param filename jpg filename
-     * @return true: file is optical flow stitching
+     * @param filename file name
+     * @return true:optical flow
      */
     public static boolean getUseOpticalFlow(String filename) {
         final File file = new File(filename);
@@ -635,30 +688,17 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * save image
+     * Get the current SDK version
      */
-    public static void saveJpg(String filename,
-                               String alpath,
-                               ByteBuffer buffer,
-                               int width,
-                               int height) {
-        PiPano.saveJpeg(filename,
-                alpath, false, buffer,
-                width, height, width,
-                100, false,
-                0, 0, 0, 0,
-                -1, "ljl", false);
+    public static String getVersion() {
+        return "1.2." + PiPano.getBuildNumber();
     }
 
-    public static final int DEVICE_MODEL_PILOT_ERA = 0;
-    public static final int DEVICE_MODEL_PILOT_ONE = 1;
-
     /**
-     * Set device type
-     *
-     * @param model {@link #DEVICE_MODEL_PILOT_ERA} or {@link #DEVICE_MODEL_PILOT_ONE}
+     * Set the debug log folder directory
      */
-    public static void setDeviceModel(int model) {
-        PiPano.setDeviceModel(model);
+    public static void setLogFilePath(String dirPath) {
+        String logFilePath = new File(dirPath, "pilotSDK.log").getAbsolutePath();
+        PiPano.setLogFilePath(logFilePath);
     }
 }

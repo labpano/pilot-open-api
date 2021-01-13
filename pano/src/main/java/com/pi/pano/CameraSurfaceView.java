@@ -10,6 +10,8 @@ import android.os.HandlerThread;
 import android.util.AttributeSet;
 import android.util.Log;
 
+import com.pi.pano.annotation.PiProWb;
+
 import java.io.File;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -47,7 +49,8 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     private CameraFixShakeListener mCameraFixShakeListener;
 
     public int mDefaultISO;
-    public int mDefaultWb;
+    @PiProWb
+    public String mDefaultWb = PiProWb.auto;
     public int mDefaultExposureCompenstation;
     private Camera[] cameras;
 
@@ -178,69 +181,42 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             return;
         }
 
-        if (hdrIndex == 2) {
-            listener.onHdrPhotoParameter(PilotSDK.HDR_PLUS_1);
-            listener.mSkipFrame = 7;
-            mPiPano.takePhoto(1, listener);
-        } else if (hdrIndex == 1) {
-            listener.onHdrPhotoParameter(PilotSDK.HDR_PLUS_2);
-            listener.mSkipFrame = 7;
-            mPiPano.takePhoto(0, listener);
-        } else if (hdrIndex == 0) {
-            listener.onHdrPhotoParameter(PilotSDK.HDR_PLUS_3);
-            if (listener.mHDR) {
-                ChangeResolutionListener listener1 = new ChangeResolutionListener() {
+        if (listener.mHDRImageCount > 0) {
+            listener.onHdrPhotoParameter(hdrIndex, listener.mHDRImageCount);
+            if (hdrIndex < (listener.mHDRImageCount - 1)) {
+                listener.mSkipFrame = 7;
+                mPiPano.takePhoto(hdrIndex + 1, listener);
+            } else {
+                ChangeResolutionListener changeResolutionListener = new ChangeResolutionListener() {
                     @Override
                     protected void onChangeResolution(int width, int height) {
                     }
                 };
-
-                listener1.mWidth = PilotSDK.CAMERA_PREVIEW_448_280_22[0];
-                listener1.mHeight = PilotSDK.CAMERA_PREVIEW_448_280_22[1];
-                listener1.mFps = PilotSDK.CAMERA_PREVIEW_448_280_22[2];
-
-                mPiPano.changeCameraResolution(listener1);
+                changeResolutionListener.mWidth = PilotSDK.CAMERA_PREVIEW_448_280_22[0];
+                changeResolutionListener.mHeight = PilotSDK.CAMERA_PREVIEW_448_280_22[1];
+                changeResolutionListener.mFps = PilotSDK.CAMERA_PREVIEW_448_280_22[2];
+                mPiPano.changeCameraResolution(changeResolutionListener);
             }
         }
-
-        Log.d(TAG, "the save fish eye photo value =" + listener.mSaveFisheyePhoto);
-        if (listener.mSaveFisheyePhoto) {
-            if (!listener.mHDR || hdrIndex == 2) {
-                final Object mLock = new Object();
-                TakePhotoListener thumbTakePhotoListener = new TakePhotoListener() {
-                    @Override
-                    protected void onTakePhotoComplete(int errorCode) {
-                        synchronized (mLock) {
-                            mLock.notifyAll();
-                        }
-                    }
-                };
-                thumbTakePhotoListener.mFilename = listener.mFilename;
-                ImageProcess imageProcess = new ImageProcess(720, 360, 0, thumbTakePhotoListener);
-                mPiPano.setEncodePhotoSurface(imageProcess.getImageReaderSurface());
-                mPiPano.drawLensCorrectionFrame(mLensCorrectionMode, true, listener.mTimestamp);
-                synchronized (mLock) {
-                    try {
-                        mLock.wait(2000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-
-            PiPano.recordOnceJpegInfo(0, mDefaultExposureCompenstation, mCameraToTexture[0].mDefaultISO);
-            int height = listener.mStitchPhotoHeight > PilotSDK.CAMERA_PREVIEW_4048_2530_15[0] ?
-                    PilotSDK.CAMERA_PREVIEW_4048_2530_15[0] : listener.mStitchPhotoHeight;
-            ImageProcess imageProcess = new ImageProcess(height / 2 * 5,
-                    height, hdrIndex, listener);
-            mPiPano.setEncodePhotoSurface(imageProcess.getImageReaderSurface());
-            mPiPano.drawLensCorrectionFrame(0x3333, false, listener.mTimestamp);
+        if (ExposeTimeAdjustHelper.State.ENABLED.equals(ExposeTimeAdjustHelper.getState())) {
+            PiPano.recordOnceJpegInfo(ExposeTimeAdjustHelper.getExpose(), 0, ExposeTimeAdjustHelper.getISO(),
+                    PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1);
         } else {
-            ImageProcess imageProcess = new ImageProcess(listener.mStitchPhotoWidth,
-                    listener.mStitchPhotoHeight, hdrIndex, listener);
-            mPiPano.setEncodePhotoSurface(imageProcess.getImageReaderSurface());
-            mPiPano.drawLensCorrectionFrame(mLensCorrectionMode, true, listener.mTimestamp);
+            PiPano.recordOnceJpegInfo(0, mDefaultExposureCompenstation, mDefaultISO,
+                    PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1);
         }
+
+        int width = listener.mStitchPhotoWidth;
+        int height = listener.mStitchPhotoHeight;
+        if (!listener.mIsStitched) {
+            height = Math.min(listener.mStitchPhotoHeight, PilotSDK.CAMERA_PREVIEW_4048_2530_15[0]);
+            width = height / 2 * 5;
+        }
+        ImageProcess imageProcess = new ImageProcess(width, height, hdrIndex, listener);
+        mPiPano.setEncodePhotoSurface(imageProcess.getImageReaderSurface());
+        mPiPano.drawLensCorrectionFrame(listener.mIsStitched ? 0x1111 : 0x3333,
+                listener.mIsStitched, listener.mTimestamp);
+
         listener.onTakePhotoStart();
 
         mPiPano.setEncodePhotoSurface(null);
@@ -283,26 +259,12 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             listener.mStitchPhotoWidth = width;
             listener.mStitchPhotoHeight = height;
 
-            PiPano.clearExifThumbnailBuffer();
             PiPano.clearImageList();
-            setExposureCompensation(listener.mHDR ? 0 : mDefaultExposureCompenstation);
 
-            if (listener.mHDR && !listener.isAuto) {
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            Thread.sleep(3500);
-                            if (mPiPano != null) {
-                                mPiPano.takePhoto(listener.mHDR ? 2 : 0, listener);
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }).start();
-            } else {
-                mPiPano.takePhoto(listener.mHDR ? 2 : 0, listener);
+            mPiPano.takePhoto(0, listener);
+
+            if (listener.mMakeSlamPhotoPoint) {
+                mPiPano.makeSlamPhotoPoint(listener.mFilename);
             }
         } else {
             Log.e(TAG, "takePhoto mPiPano is null");
@@ -325,15 +287,7 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
         }
     }
 
-    void setManualISO(int iso) {
-        for (CameraToTexture c : mCameraToTexture) {
-            if (c != null) {
-                c.mDefaultISO = iso;
-            }
-        }
-    }
-
-    void setWhiteBalance(int value) {
+    void setWhiteBalance(String value) {
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
                 c.setWhiteBalance(value);

@@ -13,11 +13,10 @@ import java.io.File;
 class ImageProcess implements ImageReader.OnImageAvailableListener {
     private static final String TAG = ImageProcess.class.getSimpleName();
 
-    private ImageReader mImageReader;
-    private TakePhotoListener mTakePhotoListener;
-
-    private HandlerThread mThreadHandler;
-    private int mHdrIndex;
+    private final ImageReader mImageReader;
+    private final TakePhotoListener mTakePhotoListener;
+    private final HandlerThread mThreadHandler;
+    private final int mHdrIndex;
 
     ImageProcess(int width, int height, int hdrIndex, TakePhotoListener listener) {
         mTakePhotoListener = listener;
@@ -48,89 +47,53 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
         int stride = image.getPlanes()[0].getRowStride() / image.getPlanes()[0].getPixelStride();
         Log.i(TAG, "width: " + image.getWidth() + " height: " + image.getHeight() + " stride: " + stride);
 
-        boolean isThumbnail = width < 1500;
-
-        File filename = null;
-        if (isThumbnail) {
-            filename = new File("/sdcard/DCIM/Thumbs/" + mTakePhotoListener.mFilename + ".jpg");
-        } else if (mTakePhotoListener.mHDR) {
-            if (mTakePhotoListener.mSaveHdrSourceFile) {
-                filename = new File("/sdcard/DCIM/Photos/Unstitched/" +
-                        mTakePhotoListener.mFilename + ".hdr/" + mHdrIndex + ".jpg");
+        String unstitchFilename = null;
+        if (mTakePhotoListener.mUnStitchDirPath != null) {
+            unstitchFilename = mTakePhotoListener.mUnStitchDirPath + mTakePhotoListener.mFilename + ".jpg";
+            File file = new File(unstitchFilename);
+            if (!file.getParentFile().exists()) {
+                file.getParentFile().mkdirs();
             }
-        } else {
-            filename = new File("/sdcard/DCIM/Photos/Unstitched/" + mTakePhotoListener.mFilename + ".jpg");
-        }
-        if (filename != null && !filename.getParentFile().exists()) {
-            filename.getParentFile().mkdirs();
         }
 
-        File stitchFilename = null;
-        if (!isThumbnail) {
-            if (null == mTakePhotoListener.mStitchDirPath) {
-                stitchFilename = new File("/sdcard/DCIM/Photos/Stitched/" + mTakePhotoListener.mFilename + ".jpg");
-            } else {
-                stitchFilename = new File(mTakePhotoListener.mStitchDirPath + mTakePhotoListener.mFilename + ".jpg");
+        String stitchFilename = null;
+        if (mTakePhotoListener.mStitchDirPath != null) {
+            stitchFilename = mTakePhotoListener.mStitchDirPath + mTakePhotoListener.mFilename + ".jpg";
+            File file = new File(stitchFilename);
+            if (!file.getParentFile().exists()) {
+                file.getParentFile().mkdirs();
             }
-            if (!stitchFilename.getParentFile().exists()) {
-                stitchFilename.getParentFile().mkdirs();
+        }
+
+        if (mTakePhotoListener.mSaveHdrSourceFile && mTakePhotoListener.mHDRImageCount > 0 && null != unstitchFilename) {
+            String hdrDir = unstitchFilename.replace(".jpg", ".hdr");
+            File file = new File(hdrDir);
+            if (!file.exists()) {
+                file.mkdirs();
             }
+            PiPano.saveJpeg(hdrDir + "/" + mHdrIndex + ".jpg", null,
+                    0, image.getPlanes()[0].getBuffer(), width, height,
+                    stride, mTakePhotoListener.mJpegQuilty, mTakePhotoListener.mSaveExif,
+                    mTakePhotoListener.mHeading, mTakePhotoListener.mLatitude,
+                    mTakePhotoListener.mLongitude, mTakePhotoListener.mAltitude,
+                    mTakePhotoListener.mArtist);
         }
 
         try {
-            int ret = 0;
+            int ret = PiPano.saveJpeg(unstitchFilename, stitchFilename,
+                    mTakePhotoListener.mHDRImageCount, image.getPlanes()[0].getBuffer(), width, height,
+                    stride, mTakePhotoListener.mJpegQuilty, mTakePhotoListener.mSaveExif,
+                    mTakePhotoListener.mHeading, mTakePhotoListener.mLatitude,
+                    mTakePhotoListener.mLongitude, mTakePhotoListener.mAltitude,
+                    mTakePhotoListener.mArtist);
 
-            if (filename != null) {
-                ret = PiPano.saveJpeg(filename.getPath(),
-                        stitchFilename == null || mTakePhotoListener.mHDR ? null : stitchFilename.getPath(),
-                        false, image.getPlanes()[0].getBuffer(), width, height,
-                        stride, !isThumbnail ? mTakePhotoListener.mJpegQuilty : 30, !isThumbnail,
-                        mTakePhotoListener.mHeading, mTakePhotoListener.mLatitude,
-                        mTakePhotoListener.mLongitude, mTakePhotoListener.mAltitude, -1,
-                        mTakePhotoListener.mArtist, mTakePhotoListener.saveFishPicture);
-            }
-
-            if (ret != 0) {
-                ret += 100;
+            if (ret < 0) {
                 mTakePhotoListener.mHDRError = true;
-            }
-
-            //If it is a thumbnail, then unlock it, because you must take a thumbnail before taking a big picture,
-            // and wait for synchronization before taking a big picture.
-            if (mTakePhotoListener.mHDR) {
-                if (mTakePhotoListener.mHDRError) {
-                    Log.e(TAG, "take photo error ret: " + ret);
-                    mTakePhotoListener.onTakePhotoComplete(ret);
-                } else {
-                    File hdrFilename = new File("/sdcard/DCIM/Photos/Unstitched/" +
-                            mTakePhotoListener.mFilename + ".jpg");
-                    if (!hdrFilename.getParentFile().exists()) {
-                        hdrFilename.getParentFile().mkdirs();
-                    }
-                    //The internal execution of saveJpeg below is synthetic hdr
-                    ret = PiPano.saveJpeg(hdrFilename.getPath(),
-                            stitchFilename == null ? null : stitchFilename.getPath(),
-                            true, image.getPlanes()[0].getBuffer(), width, height,
-                            stride, 100, true,
-                            mTakePhotoListener.mHeading, mTakePhotoListener.mLatitude,
-                            mTakePhotoListener.mLongitude, mTakePhotoListener.mAltitude, -1,
-                            mTakePhotoListener.mArtist, mTakePhotoListener.saveFishPicture);
-                    if (ret < 0) {
-                        ret += 200;
-                        mTakePhotoListener.mHDRError = true;
-                        Log.e(TAG, "take hdr error ret: " + ret);
-                    }
-                    //If it returns 1, it means that pictures are being added to hdrImageList and no callback
-                    if (ret != 1) {
-                        mTakePhotoListener.onTakePhotoComplete(ret);
-                    }
-                }
-            } else {
-                if (ret != 0) {
-                    Log.e(TAG, "take photo error ret: " + ret);
-                }
+                Log.e(TAG, "saveJpeg error ret: " + ret);
+            } else if (ret == 0) {
                 mTakePhotoListener.onTakePhotoComplete(ret);
             }
+
             image.close();
             reader.close();
         } catch (OutOfMemoryError e) {

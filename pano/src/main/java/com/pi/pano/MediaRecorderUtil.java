@@ -1,6 +1,5 @@
 package com.pi.pano;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.hardware.Sensor;
@@ -14,7 +13,6 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaRecorder;
-import android.os.Build;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -276,7 +274,6 @@ public class MediaRecorderUtil {
         @Override
         public void run() {
             mLastFrameTimestamp = -1;
-            Log.e(TAG, "mRun------------------------>" + mRun);
 
             while (mRun) {
                 encordeVideoFrame();
@@ -476,24 +473,15 @@ public class MediaRecorderUtil {
     void stopRecord() {
         PilotSDK.setEncodeInputSurfaceForVideo(null);
         mRun = false;
-
-        Log.e(TAG, "------------------------Thread.activeCount()>" + Thread.activeCount() + "");
-
-        Log.e(TAG, "------------------------mRun02>" + System.currentTimeMillis() + "");
         try {
             Log.e(TAG, System.currentTimeMillis() + "");
             mVideoThread.join();
-            Log.e(TAG, "------------------------time0>" + System.currentTimeMillis() + "");
             mAudioThread.join();
-            Log.e(TAG, "------------------------time1>" + System.currentTimeMillis() + "");
             if (mMediaMuxer != null) {
                 mMediaMuxer.stop();
                 mMediaMuxer.release();
             }
-
-            Log.e(TAG, "------------------------time2>" + System.currentTimeMillis() + "");
         } catch (Exception e) {
-            Log.e(TAG, "------------------------message>" + e.getMessage());
             e.printStackTrace();
         }
         if (mSensorManager != null) {

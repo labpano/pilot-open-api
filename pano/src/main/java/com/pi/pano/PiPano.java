@@ -1,6 +1,7 @@
 package com.pi.pano;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.os.Handler;
@@ -36,15 +37,13 @@ class PiPano {
     private static final int MSG_PIPANO_FRAME_AVAILABLE = 13;
     private static final int MSG_PIPANO_ENCODER_SURFACE_UPDATE = 14;
     private static final int MSG_PIPANO_SET_STABILIZATION_FILENAME = 15;
+    private static final int MSG_PIPANO_SET_SLAME_ENABLE = 16;
     private static final int MSG_PIPANO_SAVE_PHOTO = 17;
+    private static final int MSG_PIPANO_PARAM_RECALI = 18;
 
-    private static final int WTI_Text = 0;
-    private static final int WTI_DebugPreview = 2;
-    private static final int WTI_DebugEncoder = 3;
-
-    private PiPanoListener mPiPanoListener;
-    private String mCacheDir;
-    private UpdateFrameTask mUpdateFrameTask;
+    private final PiPanoListener mPiPanoListener;
+    private final String mCacheDir;
+    private final UpdateFrameTask mUpdateFrameTask;
     private long mNativeContext;//c++用,不要删除
     SurfaceTexture[] mSurfaceTexture = new SurfaceTexture[PilotSDK.CAMERA_COUNT];
     volatile boolean mHasInit;
@@ -70,34 +69,34 @@ class PiPano {
     native void makeDebugText(boolean isPreview, String str, int color);
 
     /**
-     * 初始化全景展开库
+     * Initialize the panoramic expansion library
      */
     private native void createNativeObj(boolean isCamera, boolean isDebugMode, String cacheDir);
 
     native int getTextureId(int index);
 
     /**
-     * 画一帧预览到屏幕
+     * Draw a frame preview to the screen
      *
-     * @param effect 0-无特效 1-高斯模糊
+     * @param effect 0-No special effect;1-Gaussian blur
      */
     native void drawPreviewFrame(int effect);
 
     /**
-     * 画一帧畸变矫正
+     * Draw a frame distortion correction
      *
-     * @param mode      畸变矫正模式
-     * @param drawAlpha 是否画透明度
-     * @param timestamp 时间戳
+     * @param mode      Distortion correction mode
+     * @param drawAlpha Whether to draw transparency
+     * @param timestamp Timestamp
      */
     native void drawLensCorrectionFrame(int mode, boolean drawAlpha, long timestamp);
 
     native void drawVioFrame();
 
     /**
-     * 设置拼接距离
+     * Set stitching distance
      *
-     * @param d 拼接距离
+     * @param d Stitching distance
      */
     native void setStitchingDistance(float d);
 
@@ -106,9 +105,9 @@ class PiPano {
     native void setPresentationSurface(Surface surface);
 
     /**
-     * 设置编码surface
+     * Set the encoding surface
      *
-     * @param surface 来自mediaCodec的surface，如果设置为null，将停止渲染编码画面以减少性能消耗
+     * @param surface The surface from mediaCodec, if set to null, will stop rendering the coded picture to reduce performance consumption
      */
     native void setEncodeVideoSurface(Surface surface);
 
@@ -119,41 +118,35 @@ class PiPano {
     native void setEncodeVioSurface(Surface surface);
 
     /**
-     * 释放资源
+     * Release resources
      */
     private native int panoRelease();
 
     /**
-     * mp4插入全景信息
+     * mp4 insert panoramic information
      *
-     * @param filename       mp4文件名
-     * @param printStructure 是否打印mp4 box结构
-     * @param firmware       固件版本号
-     * @return 0成功, 否则失败
+     * @param filename       mp4 file name
+     * @param printStructure Whether to print the mp4 box structure
+     * @param firmware       Firmware version number
+     * @return 0 success, otherwise failure
      */
     native int spatialMediaImpl(String filename, boolean printStructure, String firmware);
 
     static native void clearImageList();
 
-    static native int saveJpeg(String filename, String stitchFilename, boolean useHdr, ByteBuffer byteBuffer, int width, int height, int stride, int quality,
-                               boolean save_exif, double heading, double latitude, double longitude, int altitude,
-                               int cutoutPortrait, String artist, boolean saveUnStitch);
+    static native int saveJpeg(String unstitchFilename, String stitchFilename, int hdrImageCount, ByteBuffer byteBuffer, int width, int height, int stride, int quality,
+                               boolean save_exif, double heading, double latitude, double longitude, int altitude, String artist);
 
     static native void clearExifThumbnailBuffer();
 
-    static native void recordOnceJpegInfo(int exposureTime, int exposureBias, int iso);
+    static native int makePanoWithMultiFisheye(String unstitchFilename, String stitchFilename, String[] fisheyeFilenames, int mask, int cameraCount);
+
+    static native int injectThumbnail(String filename, String thumbnailFilename);
+
+    static native void recordOnceJpegInfo(int exposureTime, int exposureBias, int iso, int writeBalance);
 
     static native void setFirmware(String firmware);
 
-    /**
-     * 保存编辑图片
-     *
-     * @param filename
-     * @param width
-     * @param height
-     * @param isThumbnail
-     * @return
-     */
     native int savePicture(String filename, String coverFile, int width, int height, boolean isThumbnail);
 
     native void muOnScale(float f);
@@ -171,26 +164,31 @@ class PiPano {
     native int muGetPreviewMode();
 
     /**
-     * 是否使用陀螺仪,回放的时候打开陀螺仪,可以指哪看哪,录像的时候可以用于防抖
+     * Set debug log path
+     */
+    static native void setLogFilePath(String logFilePath);
+
+    /**
+     * Whether to use a gyroscope, turn on the gyroscope during playback, you can refer to it, and it can be used for anti-shake when recording
      *
-     * @param use      是否使用
-     * @param filename 如果指定了filename,那么从filename读取陀螺仪数据
+     * @param use      use or not
+     * @param filename If filename is specified, then read gyroscope data from filename
      */
     native void useGyroscope(boolean use, String filename);
 
     native void setGyroscopeTimestampOffset(long timestampNs);
 
     /**
-     * 设置旋转锁定数据文件名
+     * Set the rotation lock data file name
      *
-     * @param filename 旋转锁定数据文件名
+     * @param filename Rotation lock data file name
      */
     private native void setStabilizationFilename(String filename);
 
     /**
-     * 开启旋转锁定的时候,是否锁定yaw
+     * When turning on the rotation lock, is yaw locked
      *
-     * @param lock 是否锁定yaw
+     * @param lock Lock yaws
      */
     native void lockYaw(boolean lock);
 
@@ -203,9 +201,10 @@ class PiPano {
     static native boolean getUseOpticalFlow(String filename);
 
     /**
-     * 设置延时摄影倍率,每次录像开始前必须要设置一次
+     * Set the time-lapse photography magnification, which must be set once before each recording
      *
-     * @param ratio 倍率,如果当前是7fps,如果ratio为70,那么会降低帧为7/70=0.1fps,也就是10s录一帧
+     * @param ratio If the current magnification is 7fps, if the ratio is 70,
+     *              then the frame will be reduced to 7 / 70 = 0.1fps, that is, one frame will be recorded in 10s
      */
     static native void setMemomotionRatio(int ratio);
 
@@ -219,10 +218,10 @@ class PiPano {
     }
 
     /**
-     * 设置要要绘制的surface
+     * Set the surface to draw
      *
-     * @param surface 要绘制的surface
-     * @param type    0-预览 1-录像 2-直播 3-演示
+     * @param surface Surface to draw
+     * @param type    0-preview;1-video;2-live;3-DEMO
      */
     void setSurface(Surface surface, int type) {
         Message.obtain(mUpdateFrameTask.mHandler, MSG_PIPANO_SET_ENCODE_SURFACE, type, 0, surface).sendToTarget();
@@ -250,10 +249,40 @@ class PiPano {
         Message.obtain(mUpdateFrameTask.mHandler, MSG_PIPANO_SET_STABILIZATION_FILENAME, filename).sendToTarget();
     }
 
+    private static class SlamInit {
+        boolean enable;
+        AssetManager assetManager;
+        float lenForCalMeasuringScale;
+        SlamListener listener;
+    }
+
+    native void setSlamEnableImpl(boolean enable, Object assetManager, float lenForCalMeasuringScale, Object listener);
+
+    void setSlamEnable(boolean enable, AssetManager assetManager, float lenForCalMeasuringScale, SlamListener listener) {
+        SlamInit init = new SlamInit();
+        init.enable = enable;
+        init.assetManager = assetManager;
+        init.lenForCalMeasuringScale = lenForCalMeasuringScale;
+        init.listener = listener;
+        Message.obtain(mUpdateFrameTask.mHandler, MSG_PIPANO_SET_SLAME_ENABLE, init).sendToTarget();
+    }
+
+    native void slamPause();
+
+    native void slamResume();
+
+    native void makeSlamPhotoPoint(String filename);
+
+    native void slamShowPreview(boolean show);
+
+    native void setParamReCaliEnableImpl(int executionInterval, Object listener);
+
+    void setParamReCaliEnable(int executionInterval, Object listener) {
+        Message.obtain(mUpdateFrameTask.mHandler, MSG_PIPANO_PARAM_RECALI, executionInterval, 0, listener).sendToTarget();
+    }
+
     /**
-     * 检查Watermarks文件夹下是否有默认水印,没有的话就拷贝过去
-     *
-     * @param context 上下文
+     * Check whether there is a default watermark in the watermarks folder. If not, copy it
      */
     static void makeDefaultWatermark(Context context) {
         if (context == null) {
@@ -324,7 +353,7 @@ class PiPano {
     }
 
     private class FrameAvailableTask extends HandlerThread {
-        private Handler mHandler;
+        private final Handler mHandler;
 
         FrameAvailableTask(String name) {
             super(name);
@@ -334,17 +363,17 @@ class PiPano {
     }
 
     private class UpdateFrameTask extends HandlerThread implements SurfaceTexture.OnFrameAvailableListener, Handler.Callback {
-        private Handler mHandler;
+        private final Handler mHandler;
 
         private int mPreviewFrameCount;
         private int mEncodeFrameCount;
         private int mNotSyncCount;
-        private int[] mCameraFrameCount = new int[PilotSDK.CAMERA_COUNT];
+        private final int[] mCameraFrameCount = new int[PilotSDK.CAMERA_COUNT];
         int[] mCameraFps = new int[]{30, 30, 30, 30};
         int gpuUtilizationAdd = 0;
         int gpuUtilizationCount = 0;
 
-        private FrameAvailableTask[] mFrameAvailableTask = new FrameAvailableTask[PilotSDK.CAMERA_COUNT];
+        private final FrameAvailableTask[] mFrameAvailableTask = new FrameAvailableTask[PilotSDK.CAMERA_COUNT];
         private Message mTakePhotoMessage = null;
 
         UpdateFrameTask(String name) {
@@ -373,7 +402,6 @@ class PiPano {
                                 mSurfaceTexture[3].getTimestamp() > mBaseTimestamp + 1000000) {
                             mBaseTimestamp = mSurfaceTexture[0].getTimestamp();
                             Message.obtain(mHandler, MSG_PIPANO_ENCODER_SURFACE_UPDATE, mBaseTimestamp).sendToTarget();
-                            //Log.e(TAG, "------------------------------------");
                             mBaseTimeLock.notifyAll();
                         } else {
                             try {
@@ -387,12 +415,6 @@ class PiPano {
             }
 
             Message.obtain(mHandler, MSG_PIPANO_FRAME_AVAILABLE, surfaceTexture).sendToTarget();
-
-            if (PiPano.this.mPiPanoListener.getClass() == MediaPlayerSurfaceView.class) {
-                if (surfaceTexture == mSurfaceTexture[0]) {
-                    Message.obtain(mHandler, MSG_PIPANO_ENCODER_SURFACE_UPDATE, timestamp).sendToTarget();
-                }
-            }
         }
 
         @Override
@@ -522,6 +544,13 @@ class PiPano {
                     break;
                 case MSG_PIPANO_SET_STABILIZATION_FILENAME:
                     setStabilizationFilename((String) msg.obj);
+                    break;
+                case MSG_PIPANO_SET_SLAME_ENABLE:
+                    SlamInit init = (SlamInit) msg.obj;
+                    setSlamEnableImpl(init.enable, init.assetManager, init.lenForCalMeasuringScale, init.listener);
+                    break;
+                case MSG_PIPANO_PARAM_RECALI:
+                    setParamReCaliEnableImpl(msg.arg1, msg.obj);
                     break;
                 case MSG_PIPANO_FRAME_AVAILABLE:
                     SurfaceTexture surfaceTexture = (SurfaceTexture) msg.obj;

@@ -1,6 +1,5 @@
 package com.pi.pano;
 
-import android.annotation.SuppressLint;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.MediaRecorder;
@@ -23,7 +22,6 @@ class CameraToTexture {
     private SurfaceTexture mSurfaceTexture;
     private MediaRecorder mMediaRecorder;
     private int mFps;
-    public int mDefaultISO;
 
     CameraToTexture(int index, SurfaceTexture surfaceTexture) {
         mIndex = index;
@@ -55,7 +53,7 @@ class CameraToTexture {
         return mCamera;
     }
 
-    void openCamera(int width, int height, int fps, int exposureCompenstation, int iso, int wb) {
+    void openCamera(int width, int height, int fps, int exposureCompenstation, int iso, String wb) {
         if (mCamera != null) {
             mCamera.release();
             mCamera = null;
@@ -142,41 +140,10 @@ class CameraToTexture {
         try {
             if (mCamera != null) {
                 Camera.Parameters params = mCamera.getParameters();
-                switch (iso) {
-                    case 0:
-                        params.set("iso", "auto");
-                        mDefaultISO = 0;
-                        break;
-                    case 1:
-                        params.set("iso", "50");
-                        mDefaultISO = 50;
-                        break;
-                    case 2:
-                        params.set("iso", "100");
-                        mDefaultISO = 100;
-                        break;
-                    case 3:
-                        params.set("iso", "200");
-                        mDefaultISO = 200;
-                        break;
-                    case 4:
-                        params.set("iso", "400");
-                        mDefaultISO = 400;
-                        break;
-                    case 5:
-                        params.set("iso", "800");
-                        mDefaultISO = 800;
-                        break;
-                    case 6:
-                        params.set("iso", "1600");
-                        mDefaultISO = 1600;
-                        break;
-                    case 7:
-                        params.set("iso", "sports");
-                        break;
-                    case 8:
-                        params.set("iso", "night");
-                        break;
+                if (iso == 0) {
+                    params.set("iso", "auto");
+                } else {
+                    params.set("iso", iso);
                 }
                 mCamera.setParameters(params);
             }
@@ -185,27 +152,11 @@ class CameraToTexture {
         }
     }
 
-    void setWhiteBalance(int value) {
+    void setWhiteBalance(String value) {
         try {
             if (mCamera != null) {
                 Camera.Parameters params = mCamera.getParameters();
-                switch (value) {
-                    case 0:
-                        params.set("whitebalance", "auto");
-                        break;
-                    case 1:
-                        params.set("whitebalance", "fluorescent");
-                        break;
-                    case 2:
-                        params.set("whitebalance", "incandescent");
-                        break;
-                    case 3:
-                        params.set("whitebalance", "cloudy-daylight");
-                        break;
-                    case 4:
-                        params.set("whitebalance", "daylight");
-                        break;
-                }
+                params.set("whitebalance", value);
                 mCamera.setParameters(params);
             }
         } catch (Exception e) {
@@ -335,7 +286,7 @@ class CameraToTexture {
     }
 
     void stopRecord(String firmware, PiPano piPano) {
-        Log.i(TAG, "stopRecord index:" + mIndex);
+        Log.i(TAG, "stopRecord,index:" + mIndex);
         if (mMediaRecorder != null) {
             try {
                 mMediaRecorder.stop();
@@ -354,7 +305,8 @@ class CameraToTexture {
 
         if (mIndex == 0 && mFilename != null) {
             if (piPano != null) {
-                piPano.spatialMediaImpl(mFilename, false, firmware);
+                int ret = piPano.spatialMediaImpl(mFilename, false, firmware);
+                Log.e(TAG, "spatialMediaImpl error: " + ret);
             }
             mFilename = null;
         }

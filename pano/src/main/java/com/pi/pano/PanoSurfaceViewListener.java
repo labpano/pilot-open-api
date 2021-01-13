@@ -2,6 +2,8 @@ package com.pi.pano;
 
 import android.media.MediaPlayer;
 
+import com.pi.pano.annotation.PreviewMode;
+
 /**
  * PanoSurfaceViewListener control event callback
  */
@@ -22,8 +24,10 @@ public interface PanoSurfaceViewListener {
 
     /**
      * Preview mode change event
+     *
+     * @param mode {@link PreviewMode}
      */
-    void onPanoModeChange(int mode);
+    void onPanoModeChange(@PreviewMode int mode);
 
     /**
      * when clicked
