@@ -95,7 +95,7 @@ PilotSDK.changeCameraResolution(
 
 - 停止：  
 `stopRecord(String firmware)`  
-`firmware` 为固件名称，可为空。 
+`firmware` 为固件名称，可为空。
 
 视频的分辨率及使用的预览 分辨率&帧率 ：  
 - 8K 实时拼接： PilotSDK#CAMERA_PREVIEW_4048_2530_7
@@ -227,11 +227,11 @@ PilotLive 8K 推流使用的预览 分辨率&帧率 ：
 
 - 手动曝光时间  
   + 关闭手动曝光(自动曝光)  
-    ` com.pi.pano.Exposed.close()`
+    `com.pi.pano.ExposeTimeAdjustHelper.close()`
   + 开启手动曝光  
-    `com.pi.pano.Exposed.open()`  
+    `com.pi.pano.ExposeTimeAdjustHelper.open()`  
     再设置值  
-    `com.pi.pano.Exposed.setValues(String fps, String exposedTime, String analogGain, String digitGain)`  
+    `com.pi.pano.ExposeTimeAdjustHelper.setValues(String fps, String exposedTime, String analogGain, String digitGain)`  
     参数：  
     `fps`： 当前预览的帧率；  
     `exposedTime`： 曝光时间，可用值： 312："1/3200"; 1000："1/1000"; 2000："1/500"; 10000："1/100"; 20000："1/50"; 66666："1/15";  

@@ -229,12 +229,12 @@ After the preview is loaded, the preview effect can be further adjusted.
 
 - Exposure time  
   + Turn off manual exposure  
-    ` com.pi.pano.Exposed.close()`  
+    `com.pi.pano.ExposeTimeAdjustHelper.close()`  
     Exposure time will be automatic after closing.
   + Turn on manual exposure  
-    `com.pi.pano.Exposed.open()`  
+    `com.pi.pano.ExposeTimeAdjustHelper.open()`  
     Set the value  
-    `com.pi.pano.Exposed.setValues(String fps, String exposedTime, String analogGain, String digitGain)`  
+    `com.pi.pano.ExposeTimeAdjustHelper.setValues(String fps, String exposedTime, String analogGain, String digitGain)`  
     parameter:  
     `fps`： The fps of the current preview;  
     `exposedTime`： exposure time,available values： 312："1/3200"; 1000："1/1000"; 2000："1/500"; 10000："1/100"; 20000："1/50"; 66666："1/15";  
