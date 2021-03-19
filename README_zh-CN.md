@@ -267,8 +267,16 @@ PilotLive 8K 推流使用的预览 分辨率&帧率 ：
 
 提供播放设备上生成的媒体文件功能。  
 可直接在界面中加入`com.pi.pano.MediaPlayerSurfaceView` 视图，并使用  
-`com.pi.pano.MediaPlayerSurfaceView#open(Strin filename)`  
+`com.pi.pano.MediaPlayerSurfaceView#open(String filename)`  
 打开本地文件进行播放。
+
+
+
+### 其他
+
+1. 自动关机功能服务暂停/恢复（仅在 Pilot OS v5.14.0 以上版本可用）
+   + 暂停： `com.pi.ext.PiOtherHelper#pauseAutoPowerOffService(Context context)`
+   + 恢复:  `com.pi.ext.PiOtherHelper#resumeAutoPowerOffService(Context context)`
 
 
 

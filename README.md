@@ -269,8 +269,16 @@ The following values can be adjusted when recording: ISO, EV, stitching distance
 ### Play Media File
 
 Add `com.pi.pano.MediaPlayerSurfaceView` view, and use  
-`com.pi.pano.MediaPlayerSurfaceView#open(Strin filename)`  
+`com.pi.pano.MediaPlayerSurfaceView#open(String filename)`  
 Open local file for playback.
+
+
+
+### Other
+
+1. AutoPowerOff service pause/resume (Only available on Pilot OS v5.14.0+)
+   + pause： `com.pi.ext.PiOtherHelper#pauseAutoPowerOffService(Context context)`
+   + resume:  `com.pi.ext.PiOtherHelper#resumeAutoPowerOffService(Context context)`
 
 
 
