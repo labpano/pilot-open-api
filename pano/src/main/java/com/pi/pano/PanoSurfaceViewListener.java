@@ -2,7 +2,7 @@ package com.pi.pano;
 
 import android.media.MediaPlayer;
 
-import com.pi.pano.annotation.PreviewMode;
+import com.pi.pano.annotation.PiPreviewMode;
 
 /**
  * PanoSurfaceViewListener control event callback
@@ -11,26 +11,26 @@ public interface PanoSurfaceViewListener {
     void onPanoSurfaceViewCreate();
 
     /**
-     * When MediaPlayerSurface is created, the callback when MediaPlayer is created internally
+     * When MediaPlayerSurface is created, the callback when MediaPlayer is created internally.
      *
      * @param mediaPlayer 内部创建的MediaPlayer
      */
     void onMediaPlayerCreate(MediaPlayer mediaPlayer);
 
     /**
-     * When MediaPlayerSurface is destroyed, the callback when its internal MediaPlayer is destroyed
+     * When MediaPlayerSurface is destroyed, the callback when its internal MediaPlayer is destroyed.
      */
     void onMediaPlayerRelease();
 
     /**
-     * Preview mode change event
+     * Preview mode change event.
      *
-     * @param mode {@link PreviewMode}
+     * @param mode {@link PiPreviewMode}
      */
-    void onPanoModeChange(@PreviewMode int mode);
+    void onPanoModeChange(@PiPreviewMode int mode);
 
     /**
-     * when clicked
+     * when clicked.
      */
     void onSingleTapConfirmed();
 

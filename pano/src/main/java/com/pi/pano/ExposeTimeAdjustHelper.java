@@ -7,17 +7,8 @@ import androidx.annotation.StringDef;
 import com.pi.pano.annotation.PiProEt;
 import com.pi.pano.annotation.PiProIsoInManualEx;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-
 /**
- * Manual exposure settings
+ * Manual exposure time settings.
  */
 public final class ExposeTimeAdjustHelper {
     private static final String TAG = ExposeTimeAdjustHelper.class.getSimpleName();
@@ -25,11 +16,11 @@ public final class ExposeTimeAdjustHelper {
     @StringDef({State.ENABLED, State.DISABLED})
     public @interface State {
         /**
-         * Manual exposure enabled
+         * Manual exposure time enabled
          */
         String ENABLED = "enabled";
         /**
-         * Manual exposure disabled(automatic exposure)
+         * Manual exposure time disabled(automatic exposure time)
          */
         String DISABLED = "disabled";
     }
@@ -43,36 +34,36 @@ public final class ExposeTimeAdjustHelper {
     }
 
     /**
-     * Get exposure status
+     * Get exposure time status
      */
     public static String getState() {
-        return readContent(EXPOSED_PATH_SWITCH);
+        return Utils.readContent(EXPOSED_PATH_SWITCH);
     }
 
     private static volatile long changeTimestamp = 0;
     private static volatile long costTime = 3500;
 
     /**
-     * Turn on manual exposure
+     * Turn on manual exposure time.
      */
     public static void open() {
         if (State.ENABLED.equals(getState())) {
             return;
         }
         Log.d(TAG, "open");
-        modifyFile(EXPOSED_PATH_SWITCH, WriteValue.open);
+        Utils.modifyFile(EXPOSED_PATH_SWITCH, WriteValue.open);
         markChangeTime(State.ENABLED);
     }
 
     /**
-     * Turn off manual exposure
+     * Turn off manual exposure time.
      */
     public static void close() {
         if (State.DISABLED.equals(getState())) {
             return;
         }
         Log.d(TAG, "close");
-        modifyFile(EXPOSED_PATH_SWITCH, WriteValue.close);
+        Utils.modifyFile(EXPOSED_PATH_SWITCH, WriteValue.close);
         markChangeTime(State.DISABLED);
     }
 
@@ -100,7 +91,7 @@ public final class ExposeTimeAdjustHelper {
     private static int mAnalogGain;
 
     /**
-     * Setting manual exposure parameters
+     * Setting manual exposure time parameters.
      *
      * @param fps        current frame rate
      * @param expose     time of exposure
@@ -113,7 +104,7 @@ public final class ExposeTimeAdjustHelper {
         mAnalogGain = analogGain;
         int exposedTime = Math.floorDiv(1000000, expose);
         final String content = fps + " " + exposedTime + " " + analogGain + " " + digitGain;
-        modifyFile(EXPOSED_PATH_VALUE, content);
+        Utils.modifyFile(EXPOSED_PATH_VALUE, content);
     }
 
     public static int getExpose() {
@@ -122,34 +113,5 @@ public final class ExposeTimeAdjustHelper {
 
     public static int getISO() {
         return mAnalogGain;
-    }
-
-    private static String readContent(String filePath) {
-        try {
-            FileInputStream inputStream = new FileInputStream(new File(filePath));
-            InputStreamReader inputStreamReader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-            BufferedReader reader = new BufferedReader(inputStreamReader);
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-                sb.append("\n");
-            }
-            reader.close();
-            return sb.toString().trim();
-        } catch (IOException ignore) {
-        }
-        return "";
-    }
-
-    private static void modifyFile(String path, String content) {
-        try {
-            FileWriter fileWriter = new FileWriter(path, false);
-            BufferedWriter writer = new BufferedWriter(fileWriter);
-            writer.append(content);
-            writer.flush();
-            writer.close();
-        } catch (Exception ignore) {
-        }
     }
 }

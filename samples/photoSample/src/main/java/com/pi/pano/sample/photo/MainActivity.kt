@@ -10,6 +10,9 @@ import com.pi.pano.ChangeResolutionListener
 import com.pi.pano.PanoSDKListener
 import com.pi.pano.PilotSDK
 import com.pi.pano.TakePhotoListener
+import com.pi.pano.annotation.PiPhotoResolution
+import com.pi.pano.annotation.PiPreviewMode
+import com.pi.pano.helper.PreviewHelper
 import com.pi.pano.sample.photo.R
 import java.io.File
 import java.text.SimpleDateFormat
@@ -36,34 +39,35 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPano() {
         // setup pano into your view containers
-        mPilotSDK = PilotSDK(this, findViewById(R.id.vg_preview), object : PanoSDKListener {
-            override fun onSDKCreate() {
-                // You can get thie preview picture and set the parameters for it to your needs.
-                initPreviewParameter()
-            }
+        mPilotSDK = PreviewHelper.initPanoView(
+            findViewById(R.id.vg_preview),
+            object : PanoSDKListener {
+                override fun onPanoCreate() {
+                    initPreviewParameter()
+                }
 
-            override fun onSDKRelease() {
-            }
+                override fun onPanoRelease() {
+                }
 
-            override fun onChangePanoMode(mode: Int) {
-            }
+                override fun onChangePreviewMode(mode: Int) {
+                }
 
-            override fun onSingleTapConfirmed() {
-            }
+                override fun onSingleTap() {
+                }
 
-            override fun onEncodeFrame(count: Int) {
-            }
-        })
+                override fun onEncodeFrame(count: Int) {
+                }
+            })
     }
 
     private fun initPreviewParameter() {
-        PilotSDK.changeCameraResolution(
-            PilotSDK.CAMERA_PREVIEW_4048_2530_15 // the resolution you need, it includes the frame rate
+        PreviewHelper.changeCameraResolutionForPhoto(
+            PiPhotoResolution._4K // the resolution you need, it includes the frame rate
             , object : ChangeResolutionListener() {
                 override fun onChangeResolution(width: Int, height: Int) {
                     Log.d(TAG, "change resolution to:${width}*${height}")
                     // set preview mode
-                    PilotSDK.setPreviewMode(0, 0F, true)
+                    PilotSDK.setPreviewMode(PiPreviewMode.planet, 0F, true)
                 }
             })
     }
@@ -74,8 +78,9 @@ class MainActivity : AppCompatActivity() {
         progressDialog.setMessage("Take Photo...")
         PilotSDK.takePhoto(
             generateFileName() // photo file name
-            , PilotSDK.CAMERA_PREVIEW_4048_2530_15[1] * 4 // width * 4,
-            , PilotSDK.CAMERA_PREVIEW_4048_2530_15[0] // height
+            , 4096
+            , 2048
+            ,true
             , object : TakePhotoListener() {
                 override fun onTakePhotoComplete(errorCode: Int) {
                     super.onTakePhotoComplete(errorCode)

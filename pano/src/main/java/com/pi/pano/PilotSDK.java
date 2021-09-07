@@ -1,6 +1,6 @@
 package com.pi.pano;
 
-import android.app.Activity;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.hardware.Camera;
 import android.location.Location;
@@ -10,6 +10,10 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.ViewGroup;
 
+import androidx.annotation.IntDef;
+
+import com.pi.pano.annotation.PiPreviewMode;
+import com.pi.pano.annotation.PiProEt;
 import com.pi.pano.annotation.PiProEv;
 import com.pi.pano.annotation.PiProIso;
 import com.pi.pano.annotation.PiProWb;
@@ -37,6 +41,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
     public static final int[] CAMERA_PREVIEW_3520_2200_24 = new int[]{3520, 2200, 24};
     public static final int[] CAMERA_PREVIEW_4048_2530_15 = new int[]{4048, 2530, 15};
     public static final int[] CAMERA_PREVIEW_4048_2530_7 = new int[]{4048, 2530, 14};
+    public static final int[] CAMERA_PREVIEW_2880_1800_24 = new int[]{2880, 1800, 24};
     public static final int[] CAMERA_PREVIEW_2880_1800_15 = new int[]{2880, 1800, 15};
     public static final int[] CAMERA_PREVIEW_2192_1370_30 = new int[]{1920, 1200, 30};
     public static final int[] CAMERA_PREVIEW_2192_1370_24 = new int[]{1920, 1200, 24};
@@ -49,29 +54,29 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     public static final int[] CAMERA_PREVIEW_400_250_24 = new int[]{400, 250, 24};
 
+    @SuppressLint("StaticFieldLeak")
     private static PilotSDK mSingle;
 
     private final CameraSurfaceView mCameraSurfaceView;
 
     private final PanoSDKListener mPanoSDKListener;
 
-    private final Activity mActivity;
+    private final Context mContext;
 
     /**
-     * Instantiate PanoSDK, You can when the Activity is created.
+     * Instantiate PanoSDK.
      * The preview screen will be loaded into the provided view container.
      *
-     * @param activity        loaded activity
      * @param parentView      preview view container
      * @param panoSDKListener callback
      */
-    public PilotSDK(Activity activity, ViewGroup parentView, PanoSDKListener panoSDKListener) {
+    public PilotSDK(ViewGroup parentView, PanoSDKListener panoSDKListener) {
+        mContext = parentView.getContext();
         mPanoSDKListener = panoSDKListener;
-        mActivity = activity;
 
-        makeDefaultWatermark(activity);
+        makeDefaultWatermark(mContext);
 
-        mCameraSurfaceView = new CameraSurfaceView(activity, null);
+        mCameraSurfaceView = new CameraSurfaceView(mContext, null);
 
         mCameraSurfaceView.setOnPanoModeChangeListener(this);
 
@@ -131,42 +136,14 @@ public class PilotSDK implements PanoSurfaceViewListener {
         }
     }
 
-    public static final int STITCHING_SCHEME_INFINITY = 0;
-    public static final int STITCHING_SCHEME_INDOOR = 1;
-
     /**
-     * Set splicing scheme
-     *
-     * @param scheme {@link #STITCHING_SCHEME_INFINITY} infinity
-     *               {@link #STITCHING_SCHEME_INDOOR} indoor
-     */
-    public static void setStitchingScheme(int scheme) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-
-        switch (scheme) {
-            case STITCHING_SCHEME_INFINITY:
-                mSingle.mCameraSurfaceView.setStitchingDistance(-1);
-                break;
-            case STITCHING_SCHEME_INDOOR:
-                mSingle.mCameraSurfaceView.setStitchingDistance(99.7f);
-                break;
-            default:
-                mSingle.mCameraSurfaceView.setStitchingDistance(-1);
-                break;
-        }
-    }
-
-    /**
-     * Set splicing distance
-     *
-     * @param distance The value range is -100~100, 0 is about 2m, 100 means infinity, -100 is about 0.5m
+     * Set stitching distance.
      */
     public static void setStitchingDistance(@PiStitchingDistance float distance, float max) {
         if (checkPanoSDKNotInit()) {
             return;
         }
+        Log.d(TAG, "setStitchingDistance,distance:" + distance + ",max:" + max);
         if (distance < 0) {
             mSingle.mCameraSurfaceView.setStitchingDistance(distance / 100 * 5.0f);
         } else {
@@ -180,18 +157,16 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @return cameras, the array length should be {@link #CAMERA_COUNT}
      */
     public static Camera[] getCameras() {
+        if (checkPanoSDKNotInit()) {
+            return null;
+        }
         return mSingle.mCameraSurfaceView.getCameras();
     }
 
     /**
      * Set preview mode, the way the displays the panoramic picture.
-     *
-     * @param mode          0:asteroid; 1:immersion; 2:fish eye; 3:tiling; 5:plane mode
-     * @param rotateDegree  Initial rotation angle, horizontal rotation in plane mode,
-     *                      rotation around Y axis in spherical mode, range is 0~360
-     * @param playAnimation Whether to play the switching animation during the switching process
      */
-    public static void setPreviewMode(int mode, float rotateDegree, boolean playAnimation) {
+    public static void setPreviewMode(@PiPreviewMode int mode, float rotateDegree, boolean playAnimation) {
         if (checkPanoSDKNotInit()) {
             return;
         }
@@ -212,7 +187,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.setEnableTouchEvent(enable);
     }
 
-    public static void takeThumbPhoto(String filename) {
+    private static void takeThumbPhoto(String filename) {
         PiPano.clearExifThumbnailBuffer();
 
         final Object mLock = new Object();
@@ -240,16 +215,14 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     /**
      * Take photo
-     *
-     * @param width    photo width
-     * @param height   photo height
-     * @param listener callback event
      */
-    public static void takePhoto(String filename, int width, int height, TakePhotoListener listener) {
+    public static void takePhoto(String filename, int width, int height, boolean takeThumb, TakePhotoListener listener) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-
+        if (takeThumb) {
+            takeThumbPhoto(filename);
+        }
         mSingle.mCameraSurfaceView.takePhoto(filename, width, height, listener);
     }
 
@@ -280,7 +253,8 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Add a thumbnail to the jpeg file, the thumbnail size cannot exceed 60000 bytes, if the jpeg file originally has a thumbnail, then replace it
+     * Add a thumbnail to the jpeg file, the thumbnail size cannot exceed 60000 bytes,
+     * if the jpeg file originally has a thumbnail, then replace it.
      *
      * @param jpegFilename  Jpeg file to add thumbnail
      * @param thumbFilename The thumbnail file to be added or replaced, in jpeg format, cannot exceed 60000 bytes
@@ -319,12 +293,28 @@ public class PilotSDK implements PanoSurfaceViewListener {
             return;
         }
 
-        mSingle.mCameraSurfaceView.mDefaultExposureCompenstation = value;
+        mSingle.mCameraSurfaceView.mDefaultExposureCompensation = value;
         mSingle.mCameraSurfaceView.setExposureCompensation(value);
     }
 
     /**
-     * Adjust ISO
+     * Set exposure time.
+     */
+    public static void setExposeTime(@PiProEt int value) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        mSingle.mCameraSurfaceView.mExposeTime = value;
+        if (value != PiProEt.normal) {
+            ExposeTimeAdjustHelper.open();
+            ExposeTimeAdjustHelper.setValues("15", value, mSingle.mCameraSurfaceView.mDefaultISO, mSingle.mCameraSurfaceView.mDefaultISO);
+        } else {
+            ExposeTimeAdjustHelper.close();
+        }
+    }
+
+    /**
+     * Set ISO.
      */
     public static void setISO(@PiProIso int value) {
         Log.i(TAG, "setISO value: " + value);
@@ -338,16 +328,32 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Adjust manual ISO
+     * Set white balance.
      */
     public static void setWhiteBalance(@PiProWb String value) {
         Log.i(TAG, "setWhiteBalance: " + value);
         if (checkPanoSDKNotInit()) {
             return;
         }
-
-        mSingle.mCameraSurfaceView.mDefaultWb = value;
-        mSingle.mCameraSurfaceView.setWhiteBalance(value);
+        final String _value;
+        switch (value) {
+            case PiProWb.fluorescent:
+                _value = PiProWb.daylight;
+                break;
+            case PiProWb.incandescent:
+                _value = PiProWb.cloudy_daylight;
+                break;
+            case PiProWb.cloudy_daylight:
+                _value = PiProWb.incandescent;
+                break;
+            case PiProWb.daylight:
+                _value = PiProWb.fluorescent;
+                break;
+            default:
+                _value = value;
+        }
+        mSingle.mCameraSurfaceView.mDefaultWb = _value;
+        mSingle.mCameraSurfaceView.setWhiteBalance(_value);
     }
 
     public static void setAutoWhiteBalanceLock(boolean value) {
@@ -359,19 +365,40 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.setAutoWhiteBalanceLock(value);
     }
 
+    public static void drawPreviewFrame(int frame) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        mSingle.mCameraSurfaceView.drawPreviewFrame(frame);
+    }
+
     private static String mCurrentVideoFilePath = "";
 
     private static MediaRecorderUtil mMediaRecorderUtil;
 
     /**
      * When the preview resolution is greater than 1000, the real-time splicing video is recorded,
-     * otherwise it is recorded as four separate videos for post-processing
+     * otherwise it is recorded as four separate videos for postpone-processing
      */
     public static boolean isLargePreviewSize() {
         if (checkPanoSDKNotInit()) {
             return true;
         }
         return mSingle.mCameraSurfaceView.isLargePreviewSize();
+    }
+
+    public static int getFps() {
+        if (checkPanoSDKNotInit()) {
+            return 0;
+        }
+        return mSingle.mCameraSurfaceView.getFps();
+    }
+
+    public static int getPreviewWidth() {
+        if (checkPanoSDKNotInit()) {
+            return 0;
+        }
+        return mSingle.mCameraSurfaceView.getPreviewWidth();
     }
 
     /**
@@ -384,13 +411,16 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @param channelCount    channel count
      * @param videoWidth      Real-time stitching of mp4 image width, this value is meaningless for recording 4 fisheye mp4
      * @param useForGoogleMap Whether real-time stitching is used for google map, this value is meaningless for recording 4 fisheye mp4
+     * @param useForGoogleMapBitrateMultiple The multiple of the video bit rate during Street View recording.
      * @param memomotionRatio Time-lapse photography magnification, if the current is 7fps, if the ratio is 70,
      *                        then the frame will be reduced to 7/70=0.1fps, that is, one frame is recorded in 10s,
      *                        which is only valid for real-time splicing video
      * @return Return 0 to start recording successfully
      */
-    public static int startRecord(String dirPath, String filename, int codec, int channelCount, int videoWidth, boolean useForGoogleMap,
-                                  int memomotionRatio, MediaRecorderListener listener) {
+    public static int startRecord(String dirPath, String filename,
+                                  int codec, int videoWidth, int channelCount,
+                                  boolean useForGoogleMap, float useForGoogleMapBitrateMultiple, int memomotionRatio,
+                                  MediaRecorderListener listener) {
         if (checkPanoSDKNotInit()) {
             return 1;
         }
@@ -423,14 +453,18 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
         if (isLargePreviewSize) {
             int bitRate = videoWidth * videoWidth * 3;
-            if (videoWidth == 7680 && useForGoogleMap) {
-                bitRate *= 2.5f;
-            } else {
-                bitRate *= 2;
+            float p = 1;
+            if (useForGoogleMap) {//街景
+                if (videoWidth == 7680) {//街景仅8k
+                    p = useForGoogleMapBitrateMultiple; // 街景倍数由外部控制
+                }
+            } else if (memomotionRatio != 0) {// 延时摄影
+                p = 1.2f; // 延时摄影码率再乘以1.2
             }
+            bitRate = (int) (bitRate * 2 * p);
             mMediaRecorderUtil = new MediaRecorderUtil();
             ret = mMediaRecorderUtil.startRecord(mCurrentVideoFilePath, PilotCodecConverter.convertVideoMime(codec),
-                    videoWidth, videoWidth / 2, bitRate, useForGoogleMap, memomotionRatio, mSingle.mActivity, channelCount);
+                    videoWidth, videoWidth / 2, bitRate, useForGoogleMap, memomotionRatio, mSingle.mContext, channelCount);
         } else {
             ret = mSingle.mCameraSurfaceView.startRecord(mCurrentVideoFilePath, listener, PilotCodecConverter.convertVideoEncode(codec), channelCount);
         }
@@ -439,7 +473,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Stop record
+     * 停止录像
      */
     public static void stopRecord(String firmware) {
         if (checkPanoSDKNotInit()) {
@@ -468,8 +502,6 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * Whether to use a gyroscope, turn on the gyroscope during playback, you can refer to it and behold,
      * it can be used for PilotSteady when recording
-     *
-     * @param open open 是否打开陀螺仪
      */
     public static void useGyroscope(boolean open) {
         if (checkPanoSDKNotInit()) {
@@ -529,9 +561,9 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Whether to lock yaw when turning on the rotation lock
+     * Whether to lock yaw when turning on the rotation lock.
      *
-     * @param lock Whether to lock yaw
+     * @param lock Whether to lock yaw.
      */
     public static void lockYaw(boolean lock) {
         if (checkPanoSDKNotInit()) {
@@ -544,7 +576,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * Set the inverted state, if the anti-shake is turned on, the inverted effect is invalid.
      *
-     * @param b Is it inverted
+     * @param b Is it inverted.
      */
     public static void setUpsideDown(boolean b) {
         if (checkPanoSDKNotInit()) {
@@ -565,7 +597,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
             return;
         }
         Log.i(TAG, "setSlamEnable: " + enable);
-        mSingle.mCameraSurfaceView.mPiPano.setSlamEnable(enable, mSingle.mActivity.getAssets(), lenForCalMeasuringScale, listener);
+        mSingle.mCameraSurfaceView.mPiPano.setSlamEnable(enable, mSingle.mContext.getAssets(), lenForCalMeasuringScale, listener);
     }
 
     public static void slamShowPreview(boolean show) {
@@ -598,9 +630,22 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
+     * Turn on or turn off the function of recalculating parameters.
+     *
+     * @param listener Call back from the new calculation parameter result,
+     *                 set to null to turn off the automatic calculation of the splicing distance.
+     */
+    public static void setParamReCaliEnable(ParamReCaliListener listener) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "setParamReCaliEnable " + listener);
+        mSingle.mCameraSurfaceView.mPiPano.setParamReCaliEnable(listener);
+    }
+
+    /**
      * Get whether the jpg file is a file after optical flow stitching
      *
-     * @param filename file name
      * @return true:optical flow
      */
     public static boolean getUseOpticalFlow(String filename) {
@@ -618,11 +663,17 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * Whether it is a google street view video, the judgment criterion is whether it contains camm track
      *
-     * @param filename video filename
      * @return true: file is google street view video
      */
     public static boolean isGoogleStreetViewVideo(String filename) {
         return PiPano.isGoogleStreetViewVideo(filename);
+    }
+
+    /**
+     * Get calibration parameters.
+     */
+    public static String getParam() {
+        return PiPano.getParam();
     }
 
     public static void removePreviewCallBack() {
@@ -647,11 +698,15 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.setCameraFixShakeListener(cameraFixShakeListener);
     }
 
+    ////////////////////////////////////////////////////////////////////
+    //SDK to Android
+    ////////////////////////////////////////////////////////////////////
+
     @Override
     public void onPanoSurfaceViewCreate() {
         mSingle = this;
         if (mPanoSDKListener != null) {
-            mPanoSDKListener.onSDKCreate();
+            mPanoSDKListener.onPanoCreate();
         }
     }
 
@@ -662,21 +717,22 @@ public class PilotSDK implements PanoSurfaceViewListener {
     @Override
     public void onMediaPlayerRelease() {
         if (mPanoSDKListener != null) {
-            mPanoSDKListener.onSDKRelease();
+            mPanoSDKListener.onPanoRelease();
         }
+        mSingle = null;
     }
 
     @Override
     public void onPanoModeChange(int mode) {
         if (mPanoSDKListener != null) {
-            mPanoSDKListener.onChangePanoMode(mode);
+            mPanoSDKListener.onChangePreviewMode(mode);
         }
     }
 
     @Override
     public void onSingleTapConfirmed() {
         if (mPanoSDKListener != null) {
-            mPanoSDKListener.onSingleTapConfirmed();
+            mPanoSDKListener.onSingleTap();
         }
     }
 
@@ -688,15 +744,40 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     /**
-     * Get the current SDK version
+     * Get the current SDK version.
      */
     public static String getVersion() {
         return "1.2." + PiPano.getBuildNumber();
     }
 
     /**
-     * Set the debug log folder directory
+     * Set the firmware version number.
+     *
+     * @param firmwareVersion Length exceeding 9 bytes will be truncated.
      */
+    public static void setFirmware(String firmwareVersion) {
+        PiPano.setFirmware(firmwareVersion);
+    }
+
+    public static final int DEVICE_MODEL_PILOT_ERA = 0;
+    public static final int DEVICE_MODEL_PILOT_ONE = 1;
+    public static final int DEVICE_MODEL_PILOT_WIDE = 2;
+
+    @IntDef({
+            DEVICE_MODEL_PILOT_ERA,
+            DEVICE_MODEL_PILOT_ONE,
+            DEVICE_MODEL_PILOT_WIDE
+    })
+    public @interface PanoDeviceModel {
+    }
+
+    /**
+     * Set device type.
+     */
+    public static void setDeviceModel(@PanoDeviceModel int model) {
+        PiPano.setDeviceModel(model);
+    }
+
     public static void setLogFilePath(String dirPath) {
         String logFilePath = new File(dirPath, "pilotSDK.log").getAbsolutePath();
         PiPano.setLogFilePath(logFilePath);

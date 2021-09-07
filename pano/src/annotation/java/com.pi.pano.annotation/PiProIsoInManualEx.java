@@ -3,7 +3,7 @@ package com.pi.pano.annotation;
 import androidx.annotation.IntDef;
 
 /**
- * 手动曝光时间，ISO
+ * ISO used for manual exposure time
  */
 @IntDef({
         PiProIso._100,

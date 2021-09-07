@@ -10,8 +10,9 @@ import android.view.Surface;
 
 import java.io.File;
 
-class ImageProcess implements ImageReader.OnImageAvailableListener {
-    private static final String TAG = ImageProcess.class.getSimpleName();
+class ImageProcess implements ImageReader.OnImageAvailableListener
+{
+    private static final String TAG = "ImageProcess";
 
     private final ImageReader mImageReader;
     private final TakePhotoListener mTakePhotoListener;
@@ -26,19 +27,22 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
         mThreadHandler.start();
 
         mImageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 1);
-        mImageReader.setOnImageAvailableListener(this, new Handler(mThreadHandler.getLooper()));
+        mImageReader.setOnImageAvailableListener(this,  new Handler(mThreadHandler.getLooper()));
     }
 
-    Surface getImageReaderSurface() {
-        if (mImageReader == null) {
+    Surface getImageReaderSurface()
+    {
+        if (mImageReader == null)
+        {
             return null;
         }
         return mImageReader.getSurface();
     }
 
     @Override
-    public void onImageAvailable(ImageReader reader) {
-        long begintime = System.currentTimeMillis();
+    public void onImageAvailable(ImageReader reader)
+    {
+        long beginTime = System.currentTimeMillis();
 
         Image image = reader.acquireLatestImage();
 
@@ -48,19 +52,23 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
         Log.i(TAG, "width: " + image.getWidth() + " height: " + image.getHeight() + " stride: " + stride);
 
         String unstitchFilename = null;
-        if (mTakePhotoListener.mUnStitchDirPath != null) {
+        if (mTakePhotoListener.mUnStitchDirPath != null)
+        {
             unstitchFilename = mTakePhotoListener.mUnStitchDirPath + mTakePhotoListener.mFilename + ".jpg";
             File file = new File(unstitchFilename);
-            if (!file.getParentFile().exists()) {
+            if (!file.getParentFile().exists())
+            {
                 file.getParentFile().mkdirs();
             }
         }
 
         String stitchFilename = null;
-        if (mTakePhotoListener.mStitchDirPath != null) {
+        if (mTakePhotoListener.mStitchDirPath != null)
+        {
             stitchFilename = mTakePhotoListener.mStitchDirPath + mTakePhotoListener.mFilename + ".jpg";
             File file = new File(stitchFilename);
-            if (!file.getParentFile().exists()) {
+            if (!file.getParentFile().exists())
+            {
                 file.getParentFile().mkdirs();
             }
         }
@@ -80,6 +88,12 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
         }
 
         try {
+            // Rewrite exif information before hdr.
+            if (mTakePhotoListener.mHDRImageCount > 0 && mHdrIndex == (mTakePhotoListener.mHDRImageCount - 1)) {
+                PiPano.recordOnceJpegInfo(mTakePhotoListener.hdr_exposureTime, mTakePhotoListener.hdr_ev,
+                        mTakePhotoListener.hdr_iso, mTakePhotoListener.hdr_wb);
+                Log.d(TAG, "recordOnceJpegInfo for hdr merge!");
+            }
             int ret = PiPano.saveJpeg(unstitchFilename, stitchFilename,
                     mTakePhotoListener.mHDRImageCount, image.getPlanes()[0].getBuffer(), width, height,
                     stride, mTakePhotoListener.mJpegQuilty, mTakePhotoListener.mSaveExif,
@@ -87,10 +101,13 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
                     mTakePhotoListener.mLongitude, mTakePhotoListener.mAltitude,
                     mTakePhotoListener.mArtist);
 
-            if (ret < 0) {
+            if (ret < 0)
+            {
                 mTakePhotoListener.mHDRError = true;
                 Log.e(TAG, "saveJpeg error ret: " + ret);
-            } else if (ret == 0) {
+            }
+            else if (ret == 0)
+            {
                 mTakePhotoListener.onTakePhotoComplete(ret);
             }
 
@@ -102,7 +119,7 @@ class ImageProcess implements ImageReader.OnImageAvailableListener {
             mTakePhotoListener.onTakePhotoComplete(400);
         }
 
-        Log.i(TAG, "take photo cost time: " + (System.currentTimeMillis() - begintime) + "ms");
+        Log.i(TAG, "take photo cost time: " + (System.currentTimeMillis() - beginTime) + "ms");
 
         mThreadHandler.quitSafely();
     }

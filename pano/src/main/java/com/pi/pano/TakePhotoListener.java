@@ -3,7 +3,7 @@ package com.pi.pano;
 import com.pi.pano.annotation.PiHdrCountSupport;
 
 /**
- * Photo listener
+ * Take photo listener.
  */
 public abstract class TakePhotoListener {
     long mTimestamp;
@@ -84,6 +84,11 @@ public abstract class TakePhotoListener {
      * artist
      */
     public String mArtist;
+
+    int hdr_exposureTime;
+    int hdr_iso;
+    int hdr_ev;
+    int hdr_wb;
 
     protected void onTakePhotoStart() {
     }

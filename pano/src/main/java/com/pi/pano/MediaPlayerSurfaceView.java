@@ -4,16 +4,15 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.media.ExifInterface;
 import android.media.MediaPlayer;
 import android.os.AsyncTask;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Surface;
 
 import java.io.File;
-import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.Executors;
 
@@ -22,7 +21,7 @@ import java.util.concurrent.Executors;
  * Can be used to play media file(photo、video)
  */
 public class MediaPlayerSurfaceView extends PanoSurfaceView {
-    private static final String TAG = MediaPlayerSurfaceView.class.getSimpleName();
+    private static final String TAG = "MediaPlayerSurfaceView";
 
     private Surface mGLSurface;
     private MediaPlayer mMediaPlayer;
@@ -100,6 +99,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
         } else {
             return 5;
         }
+
         return 0;
     }
 
@@ -126,14 +126,13 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
             //先加载缩略图再加载原图
             if (mIsThumbnail) {
                 try {
-                    ExifInterface exifInterface = new ExifInterface(mFilename);
                     BitmapFactory.Options options = new BitmapFactory.Options();
                     options.inSampleSize = 2;
                     String thumbsName = mFilename.substring(mFilename.lastIndexOf("/") + 1);
                     String thumbsPath = "/sdcard/DCIM/Thumbs/" + thumbsName;
                     return BitmapFactory.decodeFile(thumbsPath, options);
-                } catch (IOException e) {
-                    e.printStackTrace();
+                } catch (Exception ex) {
+                    ex.printStackTrace();
                 }
             } else {
                 BitmapFactory.Options options = new BitmapFactory.Options();
@@ -146,7 +145,8 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
         @Override
         protected void onPostExecute(Bitmap bitmap) {
             MediaPlayerSurfaceView mediaPlayerSurfaceView = mMediaPlayerSurfaceView.get();
-            if (mediaPlayerSurfaceView != null && mFilename.equals(mediaPlayerSurfaceView.mFilename)) {
+            if (mediaPlayerSurfaceView != null &&
+                    mFilename.equals(mediaPlayerSurfaceView.mFilename)) {
                 if (bitmap != null) {
                     mediaPlayerSurfaceView.mBitmap = bitmap;
                     mediaPlayerSurfaceView.drawBitmap();

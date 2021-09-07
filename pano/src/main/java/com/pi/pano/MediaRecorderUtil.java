@@ -1,6 +1,5 @@
 package com.pi.pano;
 
-import android.app.Activity;
 import android.content.Context;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -26,7 +25,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * MediaRecorder Util
  */
 public class MediaRecorderUtil {
-    private static final String TAG = MediaRecorderUtil.class.getSimpleName();
+    private static final String TAG = "MediaRecorderUtil";
 
     public static final int VIDEO_FRAME_RATE_0_3FPS = 24;
     public static final int VIDEO_FRAME_RATE_1FPS = 7;
@@ -56,10 +55,10 @@ public class MediaRecorderUtil {
     private volatile float mFrameRate = 7;
 
     private SensorManager mSensorManager;
-    private ConcurrentLinkedQueue<SimpleSensorEvent> mAccelerometerEventQueue = new ConcurrentLinkedQueue<>();
-    private ConcurrentLinkedQueue<SimpleSensorEvent> mGyroscopeEventQueue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<SimpleSensorEvent> mAccelerometerEventQueue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<SimpleSensorEvent> mGyroscopeEventQueue = new ConcurrentLinkedQueue<>();
 
-    class SimpleSensorEvent {
+    static class SimpleSensorEvent {
         long timestamp;
         float x, y, z;
 
@@ -71,10 +70,11 @@ public class MediaRecorderUtil {
         }
     }
 
-    private SensorEventListener mSensorEventListener = new SensorEventListener() {
+    private final SensorEventListener mSensorEventListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
-            switch (event.sensor.getType()) {
+            switch (event.sensor.getType())
+            {
                 case Sensor.TYPE_ACCELEROMETER:
                     mAccelerometerEventQueue.offer(new SimpleSensorEvent(event.timestamp, event.values[0], event.values[1], event.values[2]));
                     break;
@@ -83,14 +83,14 @@ public class MediaRecorderUtil {
                     break;
             }
         }
-
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
         }
     };
 
     int startRecord(String filename, String mime, int width, int height, int bitRate, boolean useForGoogleMap,
-                    int memomotionRatio, Activity activity, int channelCount) {
+                    int memomotionRatio, Context context, int channelCount)
+    {
         Log.i(TAG, "startRecord start==> filename:" + filename + " height:" + height +
                 " width:" + width + " bitRate:" + bitRate + " useForGoogleMap:" + useForGoogleMap +
                 " memomotionRatio:" + memomotionRatio + " mime:" + mime + " channelCount:" + channelCount);
@@ -179,7 +179,7 @@ public class MediaRecorderUtil {
             format.setString(MediaFormat.KEY_MIME, "application/gyro");
             mCammEncoderTrack = mMediaMuxer.addTrack(format);
 
-            mSensorManager = (SensorManager) activity.getSystemService(Context.SENSOR_SERVICE);
+            mSensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
             Sensor accelerSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             mSensorManager.registerListener(mSensorEventListener, accelerSensor, SensorManager.SENSOR_DELAY_FASTEST);
             Sensor gyroscopeSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
@@ -188,66 +188,81 @@ public class MediaRecorderUtil {
         Log.e(TAG, "------------------------mRun01>" + System.currentTimeMillis() + "");
         mRun = true;
 
-        if (audioFormat == null) {
+        // If the video is used for google map, then there is no audio,
+        // otherwise you have to wait until the first frame of audio encoding,
+        // and then start the video encoding thread.
+        if (audioFormat == null)
+        {
             mVideoThread.start();
-        } else {
+        }
+        else
+        {
             mAudioThread.start();
         }
+
         return 0;
     }
 
-    static void setLocationInfo(Location location) {
+    /**
+     * Set gps information, gps information will be used to write the video.
+     */
+    static void setLocationInfo(Location location)
+    {
         synchronized (mLocationLock) {
             mLocation = location;
         }
     }
 
-    private Thread mVideoThread = new Thread() {
-        private MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
+    private final Thread mVideoThread = new Thread() {
+        private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
 
-        ByteBuffer mCammData = ByteBuffer.allocate(64);
-        MediaCodec.BufferInfo mCammInfo = new MediaCodec.BufferInfo();
+        final ByteBuffer mCammData = ByteBuffer.allocate(64);
+        final MediaCodec.BufferInfo mCammInfo = new MediaCodec.BufferInfo();
 
-        private byte[] mBitToLittleShortBuffer = new byte[2];
-        private byte[] mBitToLittleIntBuffer = new byte[4];
-        private byte[] mBitToLittleFloatBuffer = new byte[4];
-        private byte[] mBitToLittleDoubleBuffer = new byte[8];
+        private final byte[] mBitToLittleShortBuffer = new byte[2];
+        private final byte[] mBitToLittleIntBuffer = new byte[4];
+        private final byte[] mBitToLittleFloatBuffer = new byte[4];
+        private final byte[] mBitToLittleDoubleBuffer = new byte[8];
 
         private long mFrameNumber = 0L;
 
-        private byte[] BitToLittleShort(short s) {
-            mBitToLittleShortBuffer[1] = (byte) (s >> 8);
-            mBitToLittleShortBuffer[0] = (byte) (s);
+        private byte[] BitToLittleShort(short s)
+        {
+            mBitToLittleShortBuffer[1] = (byte)(s >> 8);
+            mBitToLittleShortBuffer[0] = (byte)(s);
             return mBitToLittleShortBuffer;
         }
 
-        private byte[] BitToLittleInt(int i) {
-            mBitToLittleIntBuffer[3] = (byte) (i >> 24);
-            mBitToLittleIntBuffer[2] = (byte) (i >> 16);
-            mBitToLittleIntBuffer[1] = (byte) (i >> 8);
-            mBitToLittleIntBuffer[0] = (byte) (i);
+        private byte[] BitToLittleInt(int i)
+        {
+            mBitToLittleIntBuffer[3] = (byte)(i >> 24);
+            mBitToLittleIntBuffer[2] = (byte)(i >> 16);
+            mBitToLittleIntBuffer[1] = (byte)(i >> 8);
+            mBitToLittleIntBuffer[0] = (byte)(i);
             return mBitToLittleIntBuffer;
         }
 
-        private byte[] BitToLittleFloat(float f) {
+        private byte[] BitToLittleFloat(float f)
+        {
             int n = Float.floatToIntBits(f);
-            mBitToLittleFloatBuffer[3] = (byte) (n >> 24);
-            mBitToLittleFloatBuffer[2] = (byte) (n >> 16);
-            mBitToLittleFloatBuffer[1] = (byte) (n >> 8);
-            mBitToLittleFloatBuffer[0] = (byte) (n);
+            mBitToLittleFloatBuffer[3] = (byte)(n >> 24);
+            mBitToLittleFloatBuffer[2] = (byte)(n >> 16);
+            mBitToLittleFloatBuffer[1] = (byte)(n >> 8);
+            mBitToLittleFloatBuffer[0] = (byte)(n);
             return mBitToLittleFloatBuffer;
         }
 
-        private byte[] BitToLittleDouble(double f) {
+        private byte[] BitToLittleDouble(double f)
+        {
             long n = Double.doubleToLongBits(f);
-            mBitToLittleDoubleBuffer[7] = (byte) (n >> 56);
-            mBitToLittleDoubleBuffer[6] = (byte) (n >> 48);
-            mBitToLittleDoubleBuffer[5] = (byte) (n >> 40);
-            mBitToLittleDoubleBuffer[4] = (byte) (n >> 32);
-            mBitToLittleDoubleBuffer[3] = (byte) (n >> 24);
-            mBitToLittleDoubleBuffer[2] = (byte) (n >> 16);
-            mBitToLittleDoubleBuffer[1] = (byte) (n >> 8);
-            mBitToLittleDoubleBuffer[0] = (byte) (n);
+            mBitToLittleDoubleBuffer[7] = (byte)(n >> 56);
+            mBitToLittleDoubleBuffer[6] = (byte)(n >> 48);
+            mBitToLittleDoubleBuffer[5] = (byte)(n >> 40);
+            mBitToLittleDoubleBuffer[4] = (byte)(n >> 32);
+            mBitToLittleDoubleBuffer[3] = (byte)(n >> 24);
+            mBitToLittleDoubleBuffer[2] = (byte)(n >> 16);
+            mBitToLittleDoubleBuffer[1] = (byte)(n >> 8);
+            mBitToLittleDoubleBuffer[0] = (byte)(n);
             return mBitToLittleDoubleBuffer;
         }
 
@@ -276,7 +291,7 @@ public class MediaRecorderUtil {
             mLastFrameTimestamp = -1;
 
             while (mRun) {
-                encordeVideoFrame();
+                encodeVideoFrame();
             }
 
             try {
@@ -285,11 +300,11 @@ public class MediaRecorderUtil {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            Log.i(TAG, "encorder video thread finish");
+            Log.i(TAG, "encoder video thread finish");
         }
 
-        private void encordeVideoFrame() {
-            int outputIndex = mVideoEncoder.dequeueOutputBuffer(mBufferInfo, 1000);
+        private void encodeVideoFrame() {
+            int outputIndex = mVideoEncoder.dequeueOutputBuffer(mBufferInfo,1000);
             if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat format = mVideoEncoder.getOutputFormat();
                 mVideoEncoderTrack = mMediaMuxer.addTrack(format);
@@ -298,22 +313,25 @@ public class MediaRecorderUtil {
                     mLock.notifyAll();
                     Log.i(TAG, "DIE cicle");
                 }
-                outputIndex = mVideoEncoder.dequeueOutputBuffer(mBufferInfo, 0);
-                Log.i(TAG, "Encorder video INFO_OUTPUT_FORMAT_CHANGED");
+                outputIndex = mVideoEncoder.dequeueOutputBuffer(mBufferInfo,0);
+                Log.i(TAG, "Encoder video INFO_OUTPUT_FORMAT_CHANGED");
             }
 
-            if (outputIndex >= 0) {
+            if(outputIndex >= 0) {
                 ByteBuffer buffer = mVideoEncoder.getOutputBuffer(outputIndex);
-                if (mBufferInfo.size > 0 && buffer != null) {
+                if(mBufferInfo.size > 0 && buffer != null) {
                     if (mBufferInfo.presentationTimeUs > 0) {
-                        if (mLastFrameTimestamp == -1) {
+                        if (mLastFrameTimestamp == -1)
+                        {
                             mLastFrameTimestamp = mBufferInfo.presentationTimeUs;
                         }
-                        if (mMemomotionRatio > 0) {
+                        if (mMemomotionRatio > 0)
+                        {
                             mBufferInfo.presentationTimeUs = mLastFrameTimestamp + 33333;
                             mLastFrameTimestamp = mBufferInfo.presentationTimeUs;
                         }
-                        if (mUseForGoogleMap) {
+                        if (mUseForGoogleMap)
+                        {
                             mFrameNumber++;
                             mBufferInfo.presentationTimeUs = getPTSUs(mFrameNumber);
                         }
@@ -329,24 +347,25 @@ public class MediaRecorderUtil {
                                     //计算gps时间
                                     double timeGpsEpoch =
                                             (System.currentTimeMillis() - SystemClock.elapsedRealtime()) / 1000.0 //系统启动时间UTC
-                                                    + mLocation.getElapsedRealtimeNanos() / 1000000000.0   //上次定位的时间
-                                                    - 315964800 //UTC时间和GPS时间的转换
-                                                    + 18;   //UTC时间和GPS时间的转换
+                                            + mLocation.getElapsedRealtimeNanos() / 1000000000.0   //上次定位的时间
+                                            - 315964800 //UTC时间和GPS时间的转换
+                                            + 18;   //UTC时间和GPS时间的转换
                                     mCammData.put(BitToLittleDouble(timeGpsEpoch));
                                     mCammData.put(BitToLittleInt(3));
                                     mCammData.put(BitToLittleDouble(mLocation.getLatitude()));
                                     mCammData.put(BitToLittleDouble(mLocation.getLongitude()));
-                                    mCammData.put(BitToLittleFloat((float) mLocation.getAltitude()));
+                                    mCammData.put(BitToLittleFloat((float)mLocation.getAltitude()));
                                     mCammData.put(BitToLittleFloat(mLocation.getAccuracy()));
                                     mCammData.put(BitToLittleFloat(mLocation.getAccuracy()));//mLocation.getVerticalAccuracyMeters() 需要level26
                                     float speed = mLocation.getSpeed();
                                     float bearing = mLastBearing;
-                                    if (mLocation.hasBearing()) {
+                                    if (mLocation.hasBearing())
+                                    {
                                         bearing = mLocation.getBearing() / 180.0f * 3.1415927f;
                                         mLastBearing = bearing;
                                     }
-                                    mCammData.put(BitToLittleFloat(bearing >= 0 ? speed * (float) Math.sin(bearing) : 0));  //velocity_east
-                                    mCammData.put(BitToLittleFloat(bearing >= 0 ? speed * (float) Math.cos(bearing) : 0)); //velocity_north
+                                    mCammData.put(BitToLittleFloat(bearing >= 0 ? speed * (float) Math.sin(bearing):0));  //velocity_east
+                                    mCammData.put(BitToLittleFloat(bearing >= 0 ? speed * (float) Math.cos(bearing):0)); //velocity_north
                                     mCammData.put(BitToLittleFloat(0)); //velocity_up
                                     mCammData.put(BitToLittleFloat(0));//mLocation.getSpeedAccuracyMetersPerSecond() 需要level26
                                     mCammInfo.set(0, mCammData.position(), mBufferInfo.presentationTimeUs, 0);
@@ -355,7 +374,7 @@ public class MediaRecorderUtil {
                                 mLocation = null;
                             }
 
-                            long cameraTimestamp = (SystemClock.elapsedRealtime() - 420) * 1000000;//mBufferInfo.presentationTimeUs*1000
+                            long cameraTimestamp = (SystemClock.elapsedRealtime() - 420)*1000000;//mBufferInfo.presentationTimeUs*1000
 
                             //加速度
                             SimpleSensorEvent accelerometerEvent = getSensorEventByTime(mAccelerometerEventQueue, cameraTimestamp);
@@ -372,7 +391,8 @@ public class MediaRecorderUtil {
 
                             //陀螺仪
                             SimpleSensorEvent gyroscopeEvent = getSensorEventByTime(mGyroscopeEventQueue, cameraTimestamp);
-                            if (gyroscopeEvent != null) {
+                            if (gyroscopeEvent != null)
+                            {
                                 mCammData.clear();
                                 mCammData.putShort((short) 0);
                                 mCammData.put(BitToLittleShort((short) 2));
@@ -387,21 +407,21 @@ public class MediaRecorderUtil {
                         Log.e(TAG, "Video sample time must > 0");
                     }
                 }
-                mVideoEncoder.releaseOutputBuffer(outputIndex, false);
+                mVideoEncoder.releaseOutputBuffer(outputIndex,false);
             }
         }
     };
 
-    private Thread mAudioThread = new Thread() {
-        private MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
+    private final Thread mAudioThread = new Thread() {
+        private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
 
         private long presentationTimeUs;
 
         @Override
         public void run() {
             presentationTimeUs = 0;
-            while (mRun) {
-                encordeAudioFrame();
+            while(mRun) {
+                encodeAudioFrame();
             }
             try {
                 mAudioRecord.stop();
@@ -414,12 +434,13 @@ public class MediaRecorderUtil {
             Log.i(TAG, "encorder audio thread finish");
         }
 
-        private void encordeAudioFrame() {
+        private void encodeAudioFrame() {
             ByteBuffer[] inputBuffers = mAudioEncoder.getInputBuffers();
             int inputIndex = mAudioEncoder.dequeueInputBuffer(0);
             if (inputIndex >= 0) {
                 int readCount = mAudioRecord.read(mAudioBuffer, 0, mAudioBuffer.length); // read audio raw data
-                if (readCount < 0) {
+                if (readCount < 0)
+                {
                     return;
                 }
 
@@ -429,31 +450,35 @@ public class MediaRecorderUtil {
                 mAudioEncoder.queueInputBuffer(inputIndex, 0, mAudioBuffer.length,
                         System.nanoTime() / 1000, 0);
             }
+            else
+            {
+                //Log.e(TAG,"no empty input buffer now");
+            }
 
-            int outputIndex = mAudioEncoder.dequeueOutputBuffer(mBufferInfo, 1000);
+            int outputIndex = mAudioEncoder.dequeueOutputBuffer(mBufferInfo,1000);
             if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat format = mAudioEncoder.getOutputFormat();
                 mAudioEncoderTrack = mMediaMuxer.addTrack(format);
-                outputIndex = mAudioEncoder.dequeueOutputBuffer(mBufferInfo, 0);
-                Log.i(TAG, "Encorder audio INFO_OUTPUT_FORMAT_CHANGED");
+                outputIndex = mAudioEncoder.dequeueOutputBuffer(mBufferInfo,0);
+                Log.i(TAG, "Encoder audio INFO_OUTPUT_FORMAT_CHANGED");
 
                 mVideoThread.start();
                 synchronized (mLock) {
                     while (mVideoEncoderTrack == -1) {
-                        Log.i(TAG, "Encorder audio Dead cycle");
+                        Log.i(TAG, "Encoder audio Dead cycle");
                         try {
                             mLock.wait();
                         } catch (InterruptedException e) {
-                            Log.i(TAG, "Encorder audio Dead cycle" + e.getMessage());
+                            Log.i(TAG, "Encoder audio Dead cycle" + e.getMessage());
                             e.printStackTrace();
                         }
                     }
                 }
             }
 
-            if (outputIndex >= 0) {
+            if(outputIndex >= 0) {
                 ByteBuffer buffer = mAudioEncoder.getOutputBuffer(outputIndex);
-                if (mBufferInfo.size > 0 && buffer != null) {
+                if(mBufferInfo.size > 0 && buffer != null) {
                     if (mBufferInfo.presentationTimeUs > 0) {
                         if (presentationTimeUs > mBufferInfo.presentationTimeUs) {
                             Log.e(TAG, "Audio sample time is not incremental,ignore this ByteBuffer.");
@@ -465,7 +490,7 @@ public class MediaRecorderUtil {
                         Log.e(TAG, "Audio sample time must > 0");
                     }
                 }
-                mAudioEncoder.releaseOutputBuffer(outputIndex, false);
+                mAudioEncoder.releaseOutputBuffer(outputIndex,false);
             }
         }
     };
@@ -473,18 +498,22 @@ public class MediaRecorderUtil {
     void stopRecord() {
         PilotSDK.setEncodeInputSurfaceForVideo(null);
         mRun = false;
-        try {
-            Log.e(TAG, System.currentTimeMillis() + "");
+        try
+        {
+            Log.e(TAG,System.currentTimeMillis()+"");
             mVideoThread.join();
             mAudioThread.join();
-            if (mMediaMuxer != null) {
+            if (mMediaMuxer!=null){
                 mMediaMuxer.stop();
                 mMediaMuxer.release();
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             e.printStackTrace();
         }
-        if (mSensorManager != null) {
+        if (mSensorManager != null)
+        {
             mSensorManager.unregisterListener(mSensorEventListener);
         }
     }

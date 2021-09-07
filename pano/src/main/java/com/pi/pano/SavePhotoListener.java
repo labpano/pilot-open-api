@@ -1,6 +1,5 @@
 package com.pi.pano;
 
-
 public abstract class SavePhotoListener {
     /**
      * original file

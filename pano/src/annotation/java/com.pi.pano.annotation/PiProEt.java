@@ -3,7 +3,7 @@ package com.pi.pano.annotation;
 import androidx.annotation.IntDef;
 
 /**
- * ExposedTime
+ * Exposed Time.
  */
 @IntDef({
         PiProEt.normal,

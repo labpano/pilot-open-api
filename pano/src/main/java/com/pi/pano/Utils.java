@@ -1,31 +1,74 @@
 package com.pi.pano;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.Closeable;
+import java.io.FileInputStream;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 class Utils {
-    /**
-     * Get the real-time temperature of the device.
-     * Excessive temperature may cause equipment instability
-     */
-    public static String getCpuTemperature() {
+
+    static String readContentSingleLine(String path) {
         String result = "";
         BufferedReader reader = null;
         try {
-            reader = new BufferedReader(new FileReader("/sys/class/thermal/thermal_zone0/temp"));
+            reader = new BufferedReader(new FileReader(path));
             result = reader.readLine();
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
+            closeIO(reader);
         }
         return result;
+    }
+
+    static String readContent(String path) {
+        BufferedReader reader = null;
+        try {
+            FileInputStream inputStream = new FileInputStream(path);
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+            reader = new BufferedReader(inputStreamReader);
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+                sb.append("\n");
+            }
+            reader.close();
+            return sb.toString().trim();
+        } catch (IOException ignore) {
+        } finally {
+            closeIO(reader);
+        }
+        return "";
+    }
+
+    static void modifyFile(String path, String content) {
+        BufferedWriter writer = null;
+        try {
+            FileWriter fileWriter = new FileWriter(path, false);
+            writer = new BufferedWriter(fileWriter);
+            writer.append(content);
+            writer.flush();
+            writer.close();
+        } catch (Exception ignore) {
+        } finally {
+            closeIO(writer);
+        }
+    }
+
+    static void closeIO(Closeable closeable) {
+        if (closeable == null) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
     }
 }

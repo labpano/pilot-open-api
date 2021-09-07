@@ -1,8 +1,5 @@
 package com.pi.pano;
 
-/**
- * roam listener
- */
 public interface SlamListener {
     /**
      * Tracking state changes

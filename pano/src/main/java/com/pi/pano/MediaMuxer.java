@@ -15,7 +15,8 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.Map;
 
-final public class MediaMuxer {
+final public class MediaMuxer
+{
     /**
      * Defines the output format. These constants are used with constructor.
      */
@@ -23,55 +24,49 @@ final public class MediaMuxer {
         /* Do not change these values without updating their counterparts
          * in include/media/stagefright/MediaMuxer.h!
          */
-        private OutputFormat() {
-        }
-
-        /**
-         * MPEG4 media file format
-         */
+        private OutputFormat() {}
+        /** MPEG4 media file format*/
         static final int MUXER_OUTPUT_MPEG_4 = 0;
-        /**
-         * WEBM media file format
-         */
-        static final int MUXER_OUTPUT_WEBM = 1;
-        /**
-         * 3GPP media file format
-         */
-        static final int MUXER_OUTPUT_3GPP = 2;
-    }
+        /** WEBM media file format*/
+        static final int MUXER_OUTPUT_WEBM   = 1;
+        /** 3GPP media file format*/
+        static final int MUXER_OUTPUT_3GPP   = 2;
+    };
+
+//    /** @hide */
+//    @IntDef({
+//            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+//            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM,
+//            android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_3GPP,
+//    })
 
     @Retention(RetentionPolicy.SOURCE)
-    @interface Format {
-    }
+    @interface Format {}
 
+    // All the native functions are listed here.
     private static native long nativeSetup(@NonNull FileDescriptor fd, int format)
             throws IllegalArgumentException, IOException;
-
     private static native void nativeRelease(long nativeObject);
-
     private static native void nativeStart(long nativeObject);
-
     private static native void nativeStop(long nativeObject);
-
     private static native int nativeAddTrack(
             long nativeObject, @NonNull String[] keys, @NonNull Object[] values);
-
     private static native void nativeSetOrientationHint(
             long nativeObject, int degrees);
-
     private static native void nativeSetLocation(long nativeObject, int latitude, int longitude);
-
     private static native void nativeWriteSampleData(
             long nativeObject, int trackIndex, @NonNull ByteBuffer byteBuf,
             int offset, int size, long presentationTimeUs, int flags);
 
-    private static final int MUXER_STATE_UNINITIALIZED = -1;
-    private static final int MUXER_STATE_INITIALIZED = 0;
-    private static final int MUXER_STATE_STARTED = 1;
-    private static final int MUXER_STATE_STOPPED = 2;
+    // Muxer internal states.
+    private static final int MUXER_STATE_UNINITIALIZED  = -1;
+    private static final int MUXER_STATE_INITIALIZED    = 0;
+    private static final int MUXER_STATE_STARTED        = 1;
+    private static final int MUXER_STATE_STOPPED        = 2;
 
     private int mState = MUXER_STATE_UNINITIALIZED;
 
+    //private final CloseGuard mCloseGuard = CloseGuard.get();
     private int mLastTrackIndex = -1;
 
     private long mNativeObject;
@@ -79,12 +74,11 @@ final public class MediaMuxer {
     /**
      * Constructor.
      * Creates a media muxer that writes to the specified path.
-     *
-     * @param path   The path of the output media file.
+     * @param path The path of the output media file.
      * @param format The format of the output media file.
-     * @throws IllegalArgumentException if path is invalid or format is not supported.
-     * @throws IOException              if failed to open the file for write.
      * @see android.media.MediaMuxer.OutputFormat
+     * @throws IllegalArgumentException if path is invalid or format is not supported.
+     * @throws IOException if failed to open the file for write.
      */
     MediaMuxer(String path, @Format int format) throws IOException {
         if (path == null) {
@@ -110,12 +104,11 @@ final public class MediaMuxer {
      * must be seekable and writable. Application should not use the file referenced
      * by this file descriptor until {@link #stop}. It is the application's responsibility
      * to close the file descriptor. It is safe to do so as soon as this call returns.
-     *
-     * @param fd     The FileDescriptor of the output media file.
+     * @param fd The FileDescriptor of the output media file.
      * @param format The format of the output media file.
-     * @throws IllegalArgumentException if fd is invalid or format is not supported.
-     * @throws IOException              if failed to open the file for write.
      * @see android.media.MediaMuxer.OutputFormat
+     * @throws IllegalArgumentException if fd is invalid or format is not supported.
+     * @throws IOException if failed to open the file for write.
      */
     MediaMuxer(@NonNull FileDescriptor fd, @Format int format) throws IOException {
         setUpMediaMuxer(fd, format);
@@ -141,14 +134,13 @@ final public class MediaMuxer {
      * choose the proper orientation for playback. Note that some video players
      * may choose to ignore the composition matrix in a video during playback.
      * By default, the rotation degree is 0.</p>
-     *
      * @param degrees the angle to be rotated clockwise in degrees.
-     *                The supported angles are 0, 90, 180, and 270 degrees.
+     * The supported angles are 0, 90, 180, and 270 degrees.
      * @throws IllegalArgumentException if degree is not supported.
-     * @throws IllegalStateException    If this method is called after {@link #start}.
+     * @throws IllegalStateException If this method is called after {@link #start}.
      */
     void setOrientationHint(int degrees) {
-        if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270) {
+        if (degrees != 0 && degrees != 90  && degrees != 180 && degrees != 270) {
             throw new IllegalArgumentException("Unsupported angle: " + degrees);
         }
         if (mState == MUXER_STATE_INITIALIZED) {
@@ -166,16 +158,16 @@ final public class MediaMuxer {
      * {@link android.media.MediaMuxer.OutputFormat#MUXER_OUTPUT_MPEG_4}, and is ignored for other output
      * formats. The geodata is stored according to ISO-6709 standard.
      *
-     * @param latitude  Latitude in degrees. Its value must be in the range [-90,
-     *                  90].
+     * @param latitude Latitude in degrees. Its value must be in the range [-90,
+     * 90].
      * @param longitude Longitude in degrees. Its value must be in the range
-     *                  [-180, 180].
+     * [-180, 180].
      * @throws IllegalArgumentException If the given latitude or longitude is out
-     *                                  of range.
-     * @throws IllegalStateException    If this method is called after {@link #start}.
+     * of range.
+     * @throws IllegalStateException If this method is called after {@link #start}.
      */
     void setLocation(float latitude, float longitude) {
-        int latitudex10000 = (int) (latitude * 10000 + 0.5);
+        int latitudex10000  = (int) (latitude * 10000 + 0.5);
         int longitudex10000 = (int) (longitude * 10000 + 0.5);
 
         if (latitudex10000 > 900000 || latitudex10000 < -900000) {
@@ -198,9 +190,8 @@ final public class MediaMuxer {
      * Starts the muxer.
      * <p>Make sure this is called after {@link #addTrack} and before
      * {@link #writeSampleData}.</p>
-     *
      * @throws IllegalStateException If this method is called after {@link #start}
-     *                               or Muxer is released
+     * or Muxer is released
      */
     void start() {
         if (mNativeObject == 0) {
@@ -217,7 +208,6 @@ final public class MediaMuxer {
     /**
      * Stops the muxer.
      * <p>Once the muxer stops, it can not be restarted.</p>
-     *
      * @throws IllegalStateException if muxer is in the wrong state.
      */
     void stop() {
@@ -232,6 +222,9 @@ final public class MediaMuxer {
     @Override
     protected void finalize() throws Throwable {
         try {
+//            if (mCloseGuard != null) {
+//                mCloseGuard.warnIfOpen();
+//            }
             if (mNativeObject != 0) {
                 nativeRelease(mNativeObject);
                 mNativeObject = 0;
@@ -363,7 +356,7 @@ final public class MediaMuxer {
      * @return The track index for this newly added track, and it should be used
      * in the {@link #writeSampleData}.
      * @throws IllegalArgumentException if format is invalid.
-     * @throws IllegalStateException    if muxer is in the wrong state.
+     * @throws IllegalStateException if muxer is in the wrong state.
      */
     int addTrack(MediaFormat format) {
         if (format == null) {
@@ -383,12 +376,13 @@ final public class MediaMuxer {
             Class clazz = Class.forName("android.media.MediaFormat");
             Method method = clazz.getDeclaredMethod("getMap");
             method.setAccessible(true);
-            formatMap = (Map<String, Object>) method.invoke(format);
+            formatMap = (Map<String, Object>)method.invoke(format);
         } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
             e.printStackTrace();
         }
 
-        if (formatMap == null) {
+        if (formatMap == null)
+        {
             throw new IllegalStateException("formatMap must not be null.");
         }
 
@@ -424,14 +418,13 @@ final public class MediaMuxer {
      * the right tracks. Also, it needs to make sure the samples for each track
      * are written in chronological order (e.g. in the order they are provided
      * by the encoder.)</p>
-     *
-     * @param byteBuf    The encoded sample.
+     * @param byteBuf The encoded sample.
      * @param trackIndex The track index for this sample.
      * @param bufferInfo The buffer information related to this sample.
      * @throws IllegalArgumentException if trackIndex, byteBuf or bufferInfo is  invalid.
-     * @throws IllegalStateException    if muxer is in wrong state.
-     *                                  MediaMuxer uses the flags provided in {@link BufferInfo},
-     *                                  to signal sync frames.
+     * @throws IllegalStateException if muxer is in wrong state.
+     * MediaMuxer uses the flags provided in {@link BufferInfo},
+     * to signal sync frames.
      */
     void writeSampleData(int trackIndex, ByteBuffer byteBuf, BufferInfo bufferInfo) {
         if (trackIndex < 0 || trackIndex > mLastTrackIndex) {
@@ -478,6 +471,7 @@ final public class MediaMuxer {
         if (mNativeObject != 0) {
             nativeRelease(mNativeObject);
             mNativeObject = 0;
+            //mCloseGuard.close();
         }
         mState = MUXER_STATE_UNINITIALIZED;
     }

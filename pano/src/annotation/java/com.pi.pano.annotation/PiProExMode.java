@@ -3,7 +3,7 @@ package com.pi.pano.annotation;
 import androidx.annotation.IntDef;
 
 /**
- * 曝光模式
+ * Exposure time mode.
  */
 @IntDef({
         PiProExMode.auto,

@@ -27,18 +27,18 @@ archive 目录下放有已经编译好的构件可直接使用，包括：
 初始化同时会将预览显示在界面上：
 ```kotlin
 // 创建 PilotSDK 并指定放置预览视图的父容器
-mPilotSDK = PilotSDK(this, findViewById(R.id.vg_preview), object : PanoSDKListener {
-            override fun onSDKCreate() {
+mPilotSDK = PilotSDK(findViewById(R.id.vg_preview), object : PanoSDKListener {
+            override fun onPanoCreate() {
                 // 创建成功后可及进一步调整预览参数
             }
 
-            override fun onSDKRelease() {
+            override fun onPanoRelease() {
             }
 
-            override fun onChangePanoMode(mode: Int) {
+            override fun onChangePreviewMode(mode: Int) {
             }
 
-            override fun onSingleTapConfirmed() {
+            override fun onSingleTap() {
             }
 
             override fun onEncodeFrame(count: Int) {
@@ -277,6 +277,8 @@ PilotLive 8K 推流使用的预览 分辨率&帧率 ：
 1. 自动关机功能服务暂停/恢复（仅在 Pilot OS v5.14.0 以上版本可用）
    + 暂停： `com.pi.ext.PiOtherHelper#pauseAutoPowerOffService(Context context)`
    + 恢复:  `com.pi.ext.PiOtherHelper#resumeAutoPowerOffService(Context context)`
+
+2. `com.pi.pano.helper` 包内提供了相对简单的帮助类，可参考。
 
 
 

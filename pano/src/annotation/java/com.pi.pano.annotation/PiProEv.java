@@ -3,7 +3,7 @@ package com.pi.pano.annotation;
 import androidx.annotation.IntDef;
 
 /**
- * ev
+ * 曝光补偿值（Exposure Compensation Value）
  */
 @IntDef({
         PiProEv.reduce_1,
@@ -39,6 +39,4 @@ public @interface PiProEv {
      * 增强，最亮
      */
     int enhance_4 = +4;
-
-    int[] supportList = new int[]{reduce_4, reduce_3, reduce_2, reduce_1, normal, enhance_1, enhance_2, enhance_3, enhance_4};
 }

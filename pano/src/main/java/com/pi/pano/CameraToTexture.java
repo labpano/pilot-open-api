@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 
 class CameraToTexture {
-    private static final String TAG = CameraToTexture.class.getSimpleName();
+    private static final String TAG = "CameraToTexture";
 
     private static final int[] CAMERA_VIDEO_3648_2280 = new int[]{3648, 2280};
     private static final int[] CAMERA_VIDEO_3520_2200 = new int[]{3520, 2200};
@@ -18,8 +18,8 @@ class CameraToTexture {
     private static final int[] CAMERA_VIDEO_2192_1370 = new int[]{2192, 1370};
 
     private Camera mCamera;
-    private int mIndex;
-    private SurfaceTexture mSurfaceTexture;
+    private final int mIndex;
+    private final SurfaceTexture mSurfaceTexture;
     private MediaRecorder mMediaRecorder;
     private int mFps;
 
@@ -28,14 +28,14 @@ class CameraToTexture {
         mSurfaceTexture = surfaceTexture;
     }
 
-    int getPreivewWidth() {
+    int getPreviewWidth() {
         if (mCamera == null) {
             return 0;
         }
         return mCamera.getParameters().getPreviewSize().width;
     }
 
-    int getPreivewHeight() {
+    int getPreviewHeight() {
         if (mCamera == null) {
             return 0;
         }
@@ -53,7 +53,7 @@ class CameraToTexture {
         return mCamera;
     }
 
-    void openCamera(int width, int height, int fps, int exposureCompenstation, int iso, String wb) {
+    void openCamera(int width, int height, int fps, int exposureCompensation, int iso, String wb) {
         if (mCamera != null) {
             mCamera.release();
             mCamera = null;
@@ -74,7 +74,7 @@ class CameraToTexture {
             Camera.Parameters params = mCamera.getParameters();
             choosePreviewSize(params, width, height);
             params.setRecordingHint(false);
-            params.setExposureCompensation(exposureCompenstation);
+            params.setExposureCompensation(exposureCompensation);
             mFps = fps;
             params.setPreviewFpsRange(fps * 1000, fps * 1000);
             mCamera.setParameters(params);
@@ -114,10 +114,10 @@ class CameraToTexture {
         }
     }
 
-    private void choosePreviewSize(Camera.Parameters parms, int width, int height) {
-        for (Camera.Size size : parms.getSupportedPreviewSizes()) {
+    private void choosePreviewSize(Camera.Parameters params, int width, int height) {
+        for (Camera.Size size : params.getSupportedPreviewSizes()) {
             if (size.width == width && size.height == height) {
-                parms.setPreviewSize(width, height);
+                params.setPreviewSize(width, height);
                 return;
             }
         }
@@ -185,8 +185,8 @@ class CameraToTexture {
             mMediaRecorder.reset();
         }
 
-        int previeWidth = getPreivewWidth();
-        Log.i(TAG, "startRecord start==> filename: " + dirname + " index: " + mIndex + " preivew: " + previeWidth);
+        int previewWidth = getPreviewWidth();
+        Log.i(TAG, "startRecord start==> filename: " + dirname + " index: " + mIndex + " preview: " + previewWidth);
         if (dirname.length() == 0) {
             Log.e(TAG, "初始化状态出错");
         }
@@ -222,11 +222,11 @@ class CameraToTexture {
         }
 
         int[] videoSize;
-        if (previeWidth == PilotSDK.CAMERA_PREVIEW_400_250_24[0]) {
+        if (previewWidth == PilotSDK.CAMERA_PREVIEW_400_250_24[0]) {
             videoSize = CAMERA_VIDEO_3648_2280;
-        } else if (previeWidth == PilotSDK.CAMERA_PREVIEW_288_180_24[0]) {
+        } else if (previewWidth == PilotSDK.CAMERA_PREVIEW_288_180_24[0]) {
             videoSize = CAMERA_VIDEO_3520_2200;
-        } else if (previeWidth == PilotSDK.CAMERA_PREVIEW_512_320_30[0]) {
+        } else if (previewWidth == PilotSDK.CAMERA_PREVIEW_512_320_30[0]) {
             videoSize = CAMERA_VIDEO_3008_1880;
         } else {
             videoSize = CAMERA_VIDEO_2192_1370;
@@ -300,9 +300,9 @@ class CameraToTexture {
             if (mMediaRecorder != null) {
                 mMediaRecorder = null;
             }
-
         }
 
+        // Write the calibration parameters to 0.mp4.
         if (mIndex == 0 && mFilename != null) {
             if (piPano != null) {
                 int ret = piPano.spatialMediaImpl(mFilename, false, firmware);

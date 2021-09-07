@@ -29,18 +29,18 @@ Add the pano directory source code to your project directly to participate in th
 Initialization will also display the preview into the view container:
 ```kotlin
 // Create PilotSDK and specify the parent container to place the preview view
-mPilotSDK = PilotSDK(this, findViewById(R.id.vg_preview), object : PanoSDKListener {
-            override fun onSDKCreate() {
+mPilotSDK = PilotSDK(findViewById(R.id.vg_preview), object : PanoSDKListener {
+            override fun onPanoCreate() {
                 // After the creation is successful, you can further adjust the preview parameters
             }
 
-            override fun onSDKRelease() {
+            override fun onPanoRelease() {
             }
 
-            override fun onChangePanoMode(mode: Int) {
+            override fun onChangePreviewMode(mode: Int) {
             }
 
-            override fun onSingleTapConfirmed() {
+            override fun onSingleTap() {
             }
 
             override fun onEncodeFrame(count: Int) {
@@ -280,6 +280,7 @@ Open local file for playback.
    + pause： `com.pi.ext.PiOtherHelper#pauseAutoPowerOffService(Context context)`
    + resume:  `com.pi.ext.PiOtherHelper#resumeAutoPowerOffService(Context context)`
 
+2. The `com.pi.pano.helper` package provides a relatively simple help class for reference.
 
 
 ### Troubleshooting Q&A

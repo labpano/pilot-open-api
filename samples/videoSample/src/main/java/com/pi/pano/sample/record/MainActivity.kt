@@ -9,6 +9,9 @@ import com.pi.pano.ChangeResolutionListener
 import com.pi.pano.MediaRecorderListener
 import com.pi.pano.PanoSDKListener
 import com.pi.pano.PilotSDK
+import com.pi.pano.annotation.PiPreviewMode
+import com.pi.pano.annotation.PiVideoResolution
+import com.pi.pano.helper.PreviewHelper
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -35,22 +38,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPano() {
         // setup pano into your view containers
-        mPilotSDK = PilotSDK(
-            this,
+        mPilotSDK = PreviewHelper.initPanoView(
             findViewById(R.id.vg_preview),
             object : PanoSDKListener {
-                override fun onSDKCreate() {
+                override fun onPanoCreate() {
                     // You can get thie preview picture and set the parameters for it to your needs.
                     initPreviewParameter()
                 }
 
-                override fun onSDKRelease() {
+                override fun onPanoRelease() {
                 }
 
-                override fun onChangePanoMode(mode: Int) {
+                override fun onChangePreviewMode(mode: Int) {
                 }
 
-                override fun onSingleTapConfirmed() {
+                override fun onSingleTap() {
                 }
 
                 override fun onEncodeFrame(count: Int) {
@@ -59,13 +61,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initPreviewParameter() {
-        PilotSDK.changeCameraResolution(
-            PilotSDK.CAMERA_PREVIEW_1920_1200_30 // the resolution you need, it includes the frame rate
-            , object : ChangeResolutionListener() {
+        PreviewHelper.changeCameraResolutionForVideo(
+            PiVideoResolution._2K // the resolution you need, it includes the frame rate
+            , false,
+            object : ChangeResolutionListener() {
                 override fun onChangeResolution(width: Int, height: Int) {
                     Log.d(TAG, "change resolution to:${width}*${height}")
                     // set preview mode
-                    PilotSDK.setPreviewMode(0, 0F, true)
+                    PilotSDK.setPreviewMode(PiPreviewMode.planet, 0F, true)
                 }
             })
     }
@@ -76,8 +79,8 @@ class MainActivity : AppCompatActivity() {
                 File(
                     Environment.getExternalStorageDirectory(), "myVideos"
                 ).absolutePath + File.separator, generateFileName(), 0 // video codec
-                , 2, 3840,
-                false, 0,
+                , 1920, 2,
+                false, 1f, 0,
                 object : MediaRecorderListener {
                     override fun onError(what: Int) {
                         // error callback

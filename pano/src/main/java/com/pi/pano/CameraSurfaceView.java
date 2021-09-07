@@ -10,6 +10,8 @@ import android.os.HandlerThread;
 import android.util.AttributeSet;
 import android.util.Log;
 
+import com.pi.pano.annotation.PiProEt;
+import com.pi.pano.annotation.PiProIso;
 import com.pi.pano.annotation.PiProWb;
 
 import java.io.File;
@@ -20,38 +22,31 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAvailableListener {
-    private static final String TAG = CameraSurfaceView.class.getSimpleName();
+    private static final String TAG = "CameraSurfaceView";
 
     private static final int RECORD_RECORDING = 3;
     private static final int RECORD_STOPPING = 1;
     private static final int RECORD_STOPPED = 2;
 
-    private CameraToTexture[] mCameraToTexture = new CameraToTexture[PilotSDK.CAMERA_COUNT];
+    private final CameraToTexture[] mCameraToTexture = new CameraToTexture[PilotSDK.CAMERA_COUNT];
 
-    /**
-     * Sync lock
-     */
     private static final Object sLocks = new Object();
 
-    /**
-     * record state
-     */
     private int mStopRecordState = RECORD_STOPPED;
 
     private Timer mCheckCameraFpsTimer;
 
-    /**
-     * Pixel buffer callback processing for preview
-     */
     private ImageReader mImageReader;
     private HandlerThread mThreadHandler;
     private CameraPreviewCallback mCameraPreviewCallback;
     private CameraFixShakeListener mCameraFixShakeListener;
 
+    @PiProEt
+    public int mExposeTime;
     public int mDefaultISO;
     @PiProWb
     public String mDefaultWb = PiProWb.auto;
-    public int mDefaultExposureCompenstation;
+    public int mDefaultExposureCompensation;
     private Camera[] cameras;
 
     public CameraSurfaceView(Context context, AttributeSet attrs) {
@@ -79,7 +74,6 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             mCameraToTexture[i] = new CameraToTexture(i, mPiPano.mSurfaceTexture[i]);
         }
 
-        //Check fps. If there is no fps on a camera for 5 seconds, it means that the camera is down.
         if (mCheckCameraFpsTimer != null) {
             mCheckCameraFpsTimer.cancel();
         }
@@ -106,8 +100,8 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
                                     }
                                 }
                             };
-                            listener.mWidth = mCameraToTexture[0].getPreivewWidth();
-                            listener.mHeight = mCameraToTexture[0].getPreivewHeight();
+                            listener.mWidth = mCameraToTexture[0].getPreviewWidth();
+                            listener.mHeight = mCameraToTexture[0].getPreviewHeight();
                             listener.mFps = mCameraToTexture[0].getPreviewFps();
                             listener.mReopen = true;
                             if (null != mCameraFixShakeListener) {
@@ -120,7 +114,6 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
                         times = 0;
                     }
                 }
-
             }
         }, 1000, 1000);
     }
@@ -133,7 +126,7 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
                 c.openCamera(listener.mWidth, listener.mHeight, listener.mFps,
-                        mDefaultExposureCompenstation, mDefaultISO, mDefaultWb);
+                        mDefaultExposureCompensation, mDefaultISO, mDefaultWb);
             }
         }
 
@@ -154,7 +147,8 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             fixedThreadPool.shutdown();
             fixedThreadPool.awaitTermination(5, TimeUnit.SECONDS);
 
-            // The screen will flicker when the resolution is just switched, so wait for a while without rendering
+            // The screen will flicker when the resolution is just switched,
+            // so wait for a while without rendering
             Thread.sleep(1600);
 
             listener.onChangeResolution(listener.mWidth, listener.mHeight);
@@ -181,12 +175,15 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             return;
         }
 
+        final int curEv = mDefaultExposureCompensation;
         if (listener.mHDRImageCount > 0) {
             listener.onHdrPhotoParameter(hdrIndex, listener.mHDRImageCount);
             if (hdrIndex < (listener.mHDRImageCount - 1)) {
                 listener.mSkipFrame = 7;
                 mPiPano.takePhoto(hdrIndex + 1, listener);
-            } else {
+            } else{
+                // Switch to the smallest preview resolution when shooting the last HDR to free up memory,
+                // because the HDR algorithm requires a lot of memory
                 ChangeResolutionListener changeResolutionListener = new ChangeResolutionListener() {
                     @Override
                     protected void onChangeResolution(int width, int height) {
@@ -199,11 +196,21 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             }
         }
         if (ExposeTimeAdjustHelper.State.ENABLED.equals(ExposeTimeAdjustHelper.getState())) {
-            PiPano.recordOnceJpegInfo(ExposeTimeAdjustHelper.getExpose(), 0, ExposeTimeAdjustHelper.getISO(),
-                    PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1);
-        } else {
-            PiPano.recordOnceJpegInfo(0, mDefaultExposureCompenstation, mDefaultISO,
-                    PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1);
+            final int exposureTime = ExposeTimeAdjustHelper.getExpose();
+            final int iso = ExposeTimeAdjustHelper.getISO();
+            PiPano.recordOnceJpegInfo(exposureTime, 0, iso, PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1);
+        }
+        else {
+            final int exposureTime = ExposeTimeRealValueReader.obtainExposureTime();
+            final int iso = mDefaultISO != PiProIso.auto ? mDefaultISO : IsoRealValueReader.obtainISO();
+            final int writeBalance = PiProWb.auto.endsWith(mDefaultWb) ? 0 : 1;
+            if (listener.mHDRImageCount > 0 && hdrIndex == 0) { // 保留hdr拍摄第1张时的信息，做为合成hdr照片时的信息
+                listener.hdr_exposureTime = exposureTime;
+                listener.hdr_iso = iso;
+                listener.hdr_ev = curEv;
+                listener.hdr_wb = writeBalance;
+            }
+            PiPano.recordOnceJpegInfo(exposureTime, curEv, iso, writeBalance);
         }
 
         int width = listener.mStitchPhotoWidth;
@@ -306,15 +313,32 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     boolean isLargePreviewSize() {
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
-                //When the preview resolution is greater than 1000, the real-time splicing video is recorded,
-                // otherwise it is recorded as four separate videos for post-processing
-                if (c.getPreivewWidth() > 1000) {
+                // When the preview resolution is greater than 1000, the real-time splicing video is recorded,
+                // otherwise it is recorded as four separate videos for postpone-processing
+                if (c.getPreviewWidth() > 1000) {
                     return true;
                 }
             }
         }
-
         return false;
+    }
+
+    int getFps() {
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                return c.getPreviewFps();
+            }
+        }
+        return 0;
+    }
+
+    int getPreviewWidth() {
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                return c.getPreviewWidth();
+            }
+        }
+        return 0;
     }
 
     int startRecord(final String filename, MediaRecorderListener listener, int video_encoder, int channelCount) {

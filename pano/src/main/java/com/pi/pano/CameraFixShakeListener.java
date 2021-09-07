@@ -3,8 +3,8 @@ package com.pi.pano;
 import android.hardware.Camera;
 
 /**
- * When the camera frame rate is too low, the camera will be automatically restarted in {@link CameraSurfaceView},
- * The monitoring callback corresponding to this process
+ * When the camera frame rate is too low, the camera will be automatically restarted in
+ * {@link CameraSurfaceView}, The monitoring callback corresponding to this process.
  */
 public interface CameraFixShakeListener {
 
@@ -15,8 +15,6 @@ public interface CameraFixShakeListener {
 
     /**
      * After restart
-     *
-     * @param cameras New camera[]
      */
     void onCameraFixShakeAfter(Camera[] cameras);
 }

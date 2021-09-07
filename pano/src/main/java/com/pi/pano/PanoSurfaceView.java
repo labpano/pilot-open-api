@@ -13,6 +13,8 @@ import android.view.ScaleGestureDetector;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
+import com.pi.pano.annotation.PiPreviewMode;
+
 abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListener {
     private static final String TAG = "PanoSurfaceView";
 
@@ -31,7 +33,6 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
      * surface创建
      */
     private boolean mSurfaceCreated = false;
-
 
     public PanoSurfaceView(final Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -128,7 +129,7 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
 
     @Override
     public void onPiPanoInit() {
-        Log.i("PanoSurfaceView", "surface created");
+        Log.i(TAG, "surface created");
         DisplayManager displayManager = (DisplayManager) mContext.getSystemService(Context.DISPLAY_SERVICE);
         Display[] presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
         if (presentationDisplays.length > 0) {
@@ -170,14 +171,14 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
             } else if (pointerCount == 2) {
                 mScaleGestureDetector.onTouchEvent(event);
             }
-            Log.d(TAG, "onTouchEvent  is enableTouchEvent =:" + mEnableTouchEvent);
+            Log.d(TAG, "onTouchEvent is enableTouchEvent =:" + mEnableTouchEvent);
         }
         return true;
     }
 
     @Override
     public void onPiPanoDestroy() {
-        Log.e("PanoSurfaceView", "surface destory");
+        Log.i(TAG, "surface destroy");
 
         if (mSurfaceCreated) {
             synchronized (sLock) {
@@ -193,9 +194,14 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
     }
 
     /**
-     * {@link PilotSDK#setPreviewMode(int, float, boolean)}
+     * Set preview mode.
+     *
+     * @param mode         {@link PiPreviewMode}
+     * @param rotateDegree 0~360 Initial rotation angle, horizontal rotation in plane mode,
+     *                    rotation around Y axis in spherical mode.
+     * @param playAnimation Play switching animation.
      */
-    public void setPreviewMode(int mode, float rotateDegree, boolean playAnimation) {
+    public void setPreviewMode(@PiPreviewMode int mode, float rotateDegree, boolean playAnimation) {
         if (mPiPano != null) {
             mPiPano.muSetPreviewMode(mode, rotateDegree, playAnimation);
             mPanoSurfaceViewListener.onPanoModeChange(mPiPano.muGetPreviewMode());
@@ -209,9 +215,6 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
         }
     }
 
-    /**
-     * {@link PilotSDK#setStitchingDistance(float, float)}
-     */
     void setStitchingDistance(float d) {
         if (mPiPano != null) {
             mPiPano.setStitchingDistance(d);
@@ -220,9 +223,6 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
         }
     }
 
-    /**
-     * {@link PilotSDK#useGyroscope(boolean)} }
-     */
     public void useGyroscope(boolean open) {
         if (mPiPano != null) {
             mPiPano.useGyroscope(open, null);

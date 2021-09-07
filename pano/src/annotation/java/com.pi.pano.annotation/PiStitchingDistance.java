@@ -3,23 +3,24 @@ package com.pi.pano.annotation;
 import androidx.annotation.FloatRange;
 
 /**
- * 拼接距离
+ * Stitching distance.
  */
 @FloatRange(
-        from = PiStitchingDistance.min,
+        from = PiStitchingDistance.auto,
         to = PiStitchingDistance.infinity
 )
 public @interface PiStitchingDistance {
     /**
-     * -100:大概是0.5m
+     * Automatically measure the stitching distance.
+     * Taking pictures and real-time video recording finally adopts automatic measurement of the stitching distance.
      */
-    int min = -100;
+    int auto = -1;
     /**
-     * 0:表示标定时候的距离,大概2m
+     * The distance during calibration, about 2m.
      */
     int zero = 0;
     /**
-     * 无穷远,取值：100
+     * Infinity.
      */
-    int infinity = +100;
+    int infinity = 100;
 }
