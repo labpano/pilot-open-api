@@ -1,0 +1,37 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.pi.pilot.pano.sdk'
+    compileSdkVersion 29
+    buildToolsVersion "30.0.3"
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 29
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+    }
+    
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    sourceSets {
+        def model = 'dual'
+        main {
+            java.srcDirs += ["src/main/${model}/java","src/main/java_wrap",'src/main_ext/java']
+            jniLibs.srcDirs += ["src/main/${model}/jniLibs"]
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.5.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+}

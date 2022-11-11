@@ -1,0 +1,4 @@
+include ':samples:liveSample'
+include ':samples:videoSample'
+include ':samples:photoSample'
+include ':pano'

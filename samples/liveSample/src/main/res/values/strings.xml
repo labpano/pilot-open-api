@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">liveSample</string>
+    <string name="btn_live">Live</string>
+</resources>

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">recordVideo</string>
+    <string name="btn_record_video">Record Video</string>
+</resources>
