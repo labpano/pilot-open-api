@@ -4,16 +4,18 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import com.pi.pano.MediaRecorderListener
+import com.pi.pano.DefaultChangeResolutionListener
+import com.pi.pano.DefaultVideoChangeResolutionListener
 import com.pi.pano.PanoSDKListener
 import com.pi.pano.PilotSDK
+import com.pi.pano.ResolutionParams
+import com.pi.pano.annotation.PiResolution
 import com.pi.pano.annotation.PiVideoEncode
-import com.pi.pano.annotation.PiVideoResolution
 import com.pi.pano.wrap.PreviewWrap
-import com.pi.pano.wrap.SampleChangeResolutionListener
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 private val TAG = MainActivity::class.java.simpleName
 
@@ -60,10 +62,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initPreviewParameter() {
-        PreviewWrap.changeCameraResolutionForFishEyeVideo(
-            PiVideoResolution._5_7K // the resolution you need, it includes the frame rate
-            , "30",
-            object : SampleChangeResolutionListener() {
+        PreviewWrap.changeResolution(
+            ResolutionParams.Factory.createParamsForUnStitchVideo(PiResolution._5_7K, "30"),
+            object : DefaultVideoChangeResolutionListener() {
                 override fun onChangeResolution(width: Int, height: Int) {
                     Log.d(TAG, "change resolution to:${width}*${height}")
                 }
@@ -82,19 +83,11 @@ class MainActivity : AppCompatActivity() {
                 2,
                 false,
                 0,
-                120 * 1024 * 1024,
-                object : MediaRecorderListener {
-                    override fun onError(what: Int) {
-                        // error callback
-                        Log.d(TAG, "recode video error:${what}")
-                    }
-                },
-                null,
-                null
+                120 * 1024 * 1024
             )
             isRunning = true
         } else {
-            PilotSDK.stopRecord(true, true, "", "")
+            PilotSDK.stopRecord(true, true)
             isRunning = false
         }
         view.isSelected = isRunning

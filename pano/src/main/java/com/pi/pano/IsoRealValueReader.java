@@ -12,7 +12,7 @@ public class IsoRealValueReader {
      */
     public static int obtainISO() {
         String content = Utils.readContentSingleLine(DEVICE_FILE_ISO);
-        if (content == null || content.length() == 0) { // attempt to read again after a failed read
+        if (content == null || content.length() == 0) { // 读取失败后尝试再读一次
             content = Utils.readContentSingleLine(DEVICE_FILE_ISO);
         }
         if (null != content) {

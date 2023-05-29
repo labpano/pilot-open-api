@@ -3,7 +3,7 @@ package com.pi.pano.annotation;
 import androidx.annotation.IntDef;
 
 /**
- * Exposed Time.
+ * Exposed Time(us)，
  */
 @IntDef({
         PiExposureTime.auto,

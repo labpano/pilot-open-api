@@ -1,25 +1,23 @@
 package com.pi.pano;
 
 import android.content.Context;
-import android.graphics.PixelFormat;
-import android.media.Image;
-import android.media.ImageReader;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Surface;
 
+import androidx.annotation.NonNull;
+
+import com.pi.pano.annotation.PiAntiMode;
 import com.pi.pano.annotation.PiExposureCompensation;
 import com.pi.pano.annotation.PiExposureTime;
 import com.pi.pano.annotation.PiWhiteBalance;
+import com.pi.pano.wrap.config.FileConfig;
+import com.pi.pano.wrap.config.FileConfigHelper;
 
+import java.lang.ref.WeakReference;
 import java.util.Timer;
 
-/**
- * Camera SurfaceView.
- */
-class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAvailableListener {
+class CameraSurfaceView extends PanoSurfaceView {
     private static final String TAG = "CameraSurfaceView";
 
     /**
@@ -45,18 +43,11 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     private static final Object sLocks = new Object();
 
     /**
-     * 录像结束状态
+     * 持续采集捕获的Surface
      */
-    private int mStopRecordState = RECORD_STOPPED;
+    private WeakReference<Surface> mCaptureSurfaceRef = null;
 
     private Timer mCheckCameraFpsTimer;
-
-    /**
-     * 用于预览的像素buffer回调
-     */
-    private ImageReader mImageReader;
-    private HandlerThread mThreadHandler;
-    private CameraPreviewCallback mCameraPreviewCallback;
 
     @PiExposureTime
     public int mExposeTime;
@@ -65,6 +56,21 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     public String mDefaultWb = PiWhiteBalance.auto;
     @PiExposureCompensation
     public int mDefaultExposureCompensation;
+    @PiAntiMode
+    public String mDefaultAntiMode;
+
+    /**
+     * 是否锁定默认预览帧率
+     */
+    private boolean mLockDefaultPreviewFps = true;
+    /**
+     * 打开预览所需的 imageReader格式（用于拍照时设置）
+     */
+    private int[] mPreviewImageReaderFormat;
+    /**
+     * 锁定预览帧率时，记录下上次 绘制畸变画面的时间
+     */
+    private long mLastDrawLensTimeWithLockPfs;
 
     public CameraSurfaceView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -91,20 +97,13 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     }
 
     @Override
-    public void onPiPanoChangeCameraResolution(ChangeResolutionListener listener) {
+    public void onPiPanoChangeCameraResolution(@NonNull ChangeResolutionListener listener) {
         Log.i(TAG, "onPiPanoChangeCameraResolution " + listener.mWidth + "*" + listener.mHeight + "*" + listener.mFps);
-
-        //如果此时上一次录像仍然还同停止完成，需要等待
-        releaseCamera();
-
-        // 直播+街景 不使用默认30fps预览
-        boolean notUseDefaultFps = listener instanceof DefaultLiveChangeResolutionListener ||
-                listener instanceof DefaultScreenLiveChangeResolutionListener ||
-                listener instanceof DefaultStreetVideoChangeResolutionListener;
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
-                c.openCamera(listener.mCameraId, listener.mWidth, listener.mHeight,
-                        listener.mFps, listener.isPhoto, notUseDefaultFps);
+                c.setLockDefaultPreviewFps(mLockDefaultPreviewFps);
+                c.setPreviewImageReaderFormat(mPreviewImageReaderFormat);
+                c.checkOrOpenCamera(listener.mCameraId, listener.mWidth, listener.mHeight, listener.mFps, listener.forceChange);
             }
         }
         try {
@@ -118,44 +117,24 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     @Override
     public void onPiPanoEncoderSurfaceUpdate(long timestamp, boolean isFrameSync) {
         if (mPiPano != null && isFrameSync) {
-            mPiPano.drawLensCorrectionFrame(mLensCorrectionMode, true, timestamp, false);
-            if (mImageReader != null) {
-                mPiPano.drawVioFrame();
+            if (mLockDefaultPreviewFps) {
+                //锁定预览帧率为30fps时,确认2帧间隔时间 > (1s/30)
+                if (timestamp - mLastDrawLensTimeWithLockPfs >= 33_000_000L) {
+                    mPiPano.drawLensCorrectionFrame(mLensCorrectionMode, true, timestamp, false);
+                    mLastDrawLensTimeWithLockPfs = timestamp;
+                }
+            } else {
+                mPiPano.drawLensCorrectionFrame(mLensCorrectionMode, true, timestamp, false);
             }
         }
     }
 
     @Override
-    public void onPiPanoCaptureFrame(int hdrIndex, TakePhotoListener listener) {
-        Log.d(TAG, "onPiPanoCaptureFrame,hdrIndex:" + hdrIndex);
-        if (listener == null) {
-            Log.e(TAG, "onPiPanoCaptureFrame param listener is null");
-            return;
-        }
-        listener.onTakePhotoStart(hdrIndex);
-        //
-        int width = listener.mStitchPhotoWidth;
-        int height = listener.mStitchPhotoHeight;
-        if (listener.mIsStitched) {
-            ImageProcess imageProcess = new ImageProcess(width, height, listener.mImageFormat, hdrIndex, listener);
-            mPiPano.setEncodePhotoSurface(imageProcess.getImageReaderSurface());
-            mPiPano.drawLensCorrectionFrame(listener.mIsStitched ? 0x11 : 0x33,
-                    listener.mIsStitched, listener.mTimestamp, false);
-        } else {
-            mCameraToTexture[0].takePhoto(hdrIndex, listener);
-        }
-        if (listener.mHDRImageCount > 0) {
-            listener.onHdrPhotoParameter(hdrIndex, listener.mHDRImageCount);
-            if (hdrIndex < (listener.mHDRImageCount - 1)) {
-                listener.mSkipFrame = 7;
-                mPiPano.takePhoto(hdrIndex + 1, listener);
-            }
-        }
-        mPiPano.setEncodePhotoSurface(null);
+    public void onPiPanoCaptureFrame(int hdrIndex, @NonNull TakePhotoListener listener) {
     }
 
     private void releaseCamera() {
-        while (mStopRecordState != RECORD_STOPPED) {
+        while (null != mCaptureSurfaceRef && mCaptureSurfaceRef.get() != null) {
             synchronized (sLocks) {
                 try {
                     sLocks.wait();
@@ -164,17 +143,11 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
                 }
             }
         }
-
         mCameraToTexture[0].releaseCamera();
-        if (mPiPano != null) {
-            mPiPano.isCaptureCompleted = false;
-        }
     }
 
     @Override
     public void onPiPanoDestroy() {
-        setPreviewCallback(null);
-
         releaseCamera();
 
         if (null != mCheckCameraFpsTimer) {
@@ -192,10 +165,12 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             listener.mStitchPhotoHeight = height;
 
             PiPano.clearImageList();
+            initConfig(listener.mParams);
 
-            mPiPano.takePhoto(0, listener);
+            listener.onTakePhotoStart(0);
+            mCameraToTexture[0].takePhoto(listener);
 
-            if (listener.mMakeSlamPhotoPoint) {
+            if (listener.mParams.makeSlamPhotoPoint) {
                 mPiPano.makeSlamPhotoPoint(listener.mFilename);
             }
         } else {
@@ -243,6 +218,33 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
         }
     }
 
+    void setAntiMode(String value) {
+        this.mDefaultAntiMode = value;
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                c.setAntiMode(value);
+            }
+        }
+    }
+
+    void setLockDefaultPreviewFps(boolean value) {
+        this.mLockDefaultPreviewFps = value;
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                c.setLockDefaultPreviewFps(value);
+            }
+        }
+    }
+
+    void setPreviewImageReaderFormat(int[] values) {
+        mPreviewImageReaderFormat = values;
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                c.setPreviewImageReaderFormat(values);
+            }
+        }
+    }
+
     boolean isLargePreviewSize() {
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
@@ -252,6 +254,19 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
             }
         }
         return false;
+    }
+
+    public boolean isLockDefaultPreviewFps() {
+        return mLockDefaultPreviewFps;
+    }
+
+    CameraEnvParams getCurCameraEnvParams() {
+        for (CameraToTexture c : mCameraToTexture) {
+            if (c != null) {
+                return c.getCameraEnvParams();
+            }
+        }
+        return null;
     }
 
     int getPreviewFps() {
@@ -312,28 +327,46 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
         }
     }
 
-    int startRecord(Surface recordSurface, boolean previewEnabled) {
+    /**
+     * start capture(recorded or live)
+     *
+     * @param surface        surface of capture
+     * @param previewEnabled preview enabled in capture
+     * @return 0:success
+     */
+    int startCapture(Surface surface, boolean previewEnabled) {
         mPiPano.setPanoEnabled(previewEnabled);
         for (CameraToTexture c : mCameraToTexture) {
             if (c != null) {
-                c.startRecord(recordSurface);
+                c.startCapture(surface);
             }
         }
-
-        mStopRecordState = RECORD_RECORDING;
-
+        mCaptureSurfaceRef = new WeakReference<>(surface);
         return 0;
     }
 
-    int stopRecord() {
-        mStopRecordState = RECORD_STOPPING;
-        for (CameraToTexture c : mCameraToTexture) {
-            if (c != null) {
-                c.stopRecord();
+    /**
+     * stop capture(recorded or live)
+     *
+     * @return 0:success
+     */
+    int stopCapture() {
+        return stopCapture(true, true);
+    }
+
+    int stopCapture(boolean sync) {
+        return stopCapture(sync, true);
+    }
+
+    int stopCapture(boolean sync, boolean startPreview) {
+        if (startPreview) {
+            for (CameraToTexture c : mCameraToTexture) {
+                if (c != null) {
+                    c.stopCapture(sync);
+                }
             }
         }
-
-        mStopRecordState = RECORD_STOPPED;
+        mCaptureSurfaceRef = null;
         synchronized (sLocks) {
             sLocks.notifyAll();
         }
@@ -342,64 +375,11 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
         return 0;
     }
 
-    boolean isInRecord() {
-        return mStopRecordState != RECORD_STOPPED;
-    }
-
-    void removePreviewCallBack() {
-        if (mImageReader != null) {
-            mImageReader.close();
-            mImageReader = null;
-        }
-
-        if (mThreadHandler != null) {
-            mThreadHandler.quitSafely();
-            mThreadHandler = null;
-        }
-        if (mPiPano != null) {
-            mPiPano.setEncodeVioSurface(null);
-        }
-    }
-
-    void setPreviewCallback(CameraPreviewCallback callback) {
-
-        if (mImageReader != null) {
-            mImageReader.close();
-            mImageReader = null;
-        }
-
-        if (mThreadHandler != null) {
-            mThreadHandler.quitSafely();
-            mThreadHandler = null;
-        }
-
-        if (callback != null) {
-            mThreadHandler = new HandlerThread("Vio");
-            mThreadHandler.start();
-
-            mImageReader = ImageReader.newInstance(1024, 512, PixelFormat.RGBA_8888, 1);
-            mImageReader.setOnImageAvailableListener(this, new Handler(mThreadHandler.getLooper()));
-        }
-
-        mPiPano.setEncodeVioSurface(mImageReader == null ? null : mImageReader.getSurface());
-        mCameraPreviewCallback = callback;
-    }
-
-    @Override
-    public void onImageAvailable(ImageReader reader) {
-        Image image = reader.acquireLatestImage();
-        //int width = image.getWidth();
-        int height = image.getHeight();
-        int stride = image.getPlanes()[0].getRowStride() / image.getPlanes()[0].getPixelStride();
-        mCameraPreviewCallback.onPreviewCallback(stride, height, image.getTimestamp(), image.getPlanes()[0].getBuffer());
-
-        image.close();
-    }
-
-    public void drawPreviewFrame(int frame) {
-        if (mPiPano != null) {
-            mPiPano.drawPreviewFrame(frame);
-        }
+    /**
+     * In continuous capture (recorded or live)
+     */
+    boolean isInCapture() {
+        return null != mCaptureSurfaceRef && mCaptureSurfaceRef.get() != null;
     }
 
     public void setCameraFixShakeListener(CameraFixShakeListener cameraFixShakeListener) {
@@ -409,5 +389,16 @@ class CameraSurfaceView extends PanoSurfaceView implements ImageReader.OnImageAv
     }
 
     public void removeCameraFixShakeListener(CameraFixShakeListener cameraFixShakeListener) {
+    }
+
+    private void initConfig(CaptureParams params) {
+        if (!params.saveConfig) {
+            return;
+        }
+        FileConfig fileConfig = FileConfigHelper.self().create(params);
+        if (fileConfig != null) {
+            fileConfig.setFittings(isLensProtected() ? 2 : 1);
+            FileConfigHelper.self().saveConfig(fileConfig);
+        }
     }
 }

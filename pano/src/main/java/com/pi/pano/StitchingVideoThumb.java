@@ -9,7 +9,7 @@ public class StitchingVideoThumb {
     }
 
     public StitchingVideoThumb(Context context) {
-        PiPano.makeDefaultWatermark(context);
+        Watermark.checkWatermarkConfig(context);
         createNativeObj();
     }
 

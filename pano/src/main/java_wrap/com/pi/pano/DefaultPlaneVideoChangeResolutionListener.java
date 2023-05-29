@@ -6,9 +6,9 @@ import androidx.annotation.NonNull;
 
 import com.pi.pano.annotation.PiPreviewMode;
 
-public class DefaultPlaneChangeResolutionListener extends DefaultChangeResolutionListener {
+public class DefaultPlaneVideoChangeResolutionListener extends DefaultChangeResolutionListener {
 
-    public DefaultPlaneChangeResolutionListener(int fieldOfView, @NonNull String aspectRatio) {
+    public DefaultPlaneVideoChangeResolutionListener(int fieldOfView, @NonNull String aspectRatio) {
         super(fieldOfView, aspectRatio);
     }
 
@@ -32,5 +32,10 @@ public class DefaultPlaneChangeResolutionListener extends DefaultChangeResolutio
         Pair<Float, Float> obtain = FieldOfViewUtils.obtain(aspectRatio, fieldOfView);
         PilotSDK.setLensCorrectionMode(lensCorrectionMode);
         PilotSDK.setPreviewMode(PiPreviewMode.vlog, rotateDegree, false, obtain.first, obtain.second);
+    }
+
+    @Override
+    protected boolean isLockDefaultPreviewFps() {
+        return false;
     }
 }

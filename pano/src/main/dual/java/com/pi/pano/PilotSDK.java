@@ -16,6 +16,7 @@ import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.pi.pano.annotation.PiAntiMode;
 import com.pi.pano.annotation.PiExposureCompensation;
 import com.pi.pano.annotation.PiExposureTime;
 import com.pi.pano.annotation.PiFileStitchFlag;
@@ -23,16 +24,11 @@ import com.pi.pano.annotation.PiIso;
 import com.pi.pano.annotation.PiPreviewMode;
 import com.pi.pano.annotation.PiVideoEncode;
 import com.pi.pano.annotation.PiWhiteBalance;
-import com.pi.pano.ext.IAudioEncoderExt;
-import com.pi.pano.ext.IAudioRecordExt;
-import com.pi.pilot.pano.sdk.R;
+import com.pi.pano.wrap.config.FileConfig;
+import com.pi.pano.wrap.config.FileConfigHelper;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -92,40 +88,23 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @param panoSDKListener Callback interface of PanoSDK
      */
     public PilotSDK(ViewGroup parentView, PanoSDKListener panoSDKListener) {
-        mContext = parentView.getContext();
-        mPanoSDKListener = panoSDKListener;
-        makeDefaultWatermark(mContext);
-        mCameraSurfaceView = new CameraSurfaceView(mContext, null);
-        mCameraSurfaceView.setOnPanoModeChangeListener(this);
-        parentView.addView(mCameraSurfaceView);
+        this(parentView, false, panoSDKListener);
     }
 
     /**
-     * Check if there is a default watermark in the Watermarks folder, and copy it over if there is not.
+     * Instantiate PanoSDK when Activity onCreate
      *
-     * @param context context
+     * @param parentView      PanoSDK contains a PreviewView, which is the parent view of the PreviewView.
+     * @param lensProtectedEnable Whether with lens protection.
+     * @param panoSDKListener Callback interface of PanoSDK
      */
-    public static void makeDefaultWatermark(Context context) {
-        File file = new File("/sdcard/Watermarks/setting");
-        if (!file.exists()) {
-            if (!file.getParentFile().exists()) {
-                file.getParentFile().mkdirs();
-            }
-            try {
-                FileOutputStream fileOutputStream = new FileOutputStream(file.getPath());
-                InputStream inputStream = context.getResources().openRawResource(R.raw.watermark);
-                byte[] buffer = new byte[256];
-                fileOutputStream.write(buffer);
-                buffer = new byte[inputStream.available()];
-                inputStream.read(buffer);
-                fileOutputStream.write(buffer);
-                fileOutputStream.flush();
-                inputStream.close();
-                fileOutputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+    public PilotSDK(ViewGroup parentView, boolean lensProtectedEnable, PanoSDKListener panoSDKListener) {
+        mContext = parentView.getContext();
+        mPanoSDKListener = panoSDKListener;
+        mCameraSurfaceView = new CameraSurfaceView(mContext, null);
+        mCameraSurfaceView.initLensProtected(lensProtectedEnable);
+        mCameraSurfaceView.setOnPanoModeChangeListener(this);
+        parentView.addView(mCameraSurfaceView);
     }
 
     private static boolean checkPanoSDKNotInit() {
@@ -156,11 +135,21 @@ public class PilotSDK implements PanoSurfaceViewListener {
         }
     }
 
+    /**
+     * reload watermark
+     */
+    public static void reloadWatermark(boolean show) {
+        if (mSingle != null) {
+            mSingle.mCameraSurfaceView.mPiPano.reloadWatermark(show);
+        }
+    }
+
     public static Map<String, Object> getPreviewParam() {
         if (checkPanoSDKNotInit()) {
             return null;
         }
         Map<String, Object> param = new HashMap<>();
+        param.put("cameraId", mSingle.mCameraSurfaceView.getCameraId());
         param.put("previewWidth", mSingle.mCameraSurfaceView.getPreviewWidth());
         param.put("previewHeight", mSingle.mCameraSurfaceView.getPreviewHeight());
         param.put("previewFps", mSingle.mCameraSurfaceView.getPreviewFps());
@@ -169,6 +158,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
         param.put("iso", mSingle.mCameraSurfaceView.mDefaultISO);
         param.put("exposure-compensation", mSingle.mCameraSurfaceView.mDefaultExposureCompensation);
         param.put("whitebalance", mSingle.mCameraSurfaceView.mDefaultWb);
+        param.put("antiMode", mSingle.mCameraSurfaceView.mDefaultAntiMode);
         Log.d(TAG, "getPreviewParam," + param);
         return param;
     }
@@ -179,11 +169,12 @@ public class PilotSDK implements PanoSurfaceViewListener {
         }
         Log.d(TAG, "setPreviewParam," + param);
         if (null != param) {
+            String cameraId = (String) param.get("cameraId");
             Object previewWidth = param.get("previewWidth");
             Object previewHeight = param.get("previewHeight");
             Object previewFps = param.get("previewFps");
             if (null != previewWidth && null != previewHeight && null != previewFps) {
-                changeCameraResolution(new int[]{(int) previewWidth, (int) previewHeight, (int) previewFps}, new ChangeResolutionListener() {
+                ChangeResolutionListener listener1 = new ChangeResolutionListener() {
                     @Override
                     protected void onChangeResolution(int width, int height) {
                         setPreviewParam(param);
@@ -191,7 +182,9 @@ public class PilotSDK implements PanoSurfaceViewListener {
                             mSingle.mCameraSurfaceView.post(listener::onPreviewParamFinish);
                         }
                     }
-                });
+                };
+                listener1.fillParams(cameraId, (int) previewWidth, (int) previewHeight, (int) previewFps);
+                changeCameraResolution(false, listener1);
                 return;
             } else {
                 setPreviewParam(param);
@@ -310,11 +303,9 @@ public class PilotSDK implements PanoSurfaceViewListener {
                 }
             }
         };
+        takePhotoListener.mParams = CaptureParams.Factory.createParamsForThumb(filename);
         takePhotoListener.mIsStitched = true;
-        takePhotoListener.mUnStitchDirPath = "/sdcard/DCIM/Thumbs/";
-        takePhotoListener.mStitchDirPath = null;
         takePhotoListener.mIsThumb = true;
-        takePhotoListener.mJpegQuilty = 30;
         takePhotoListener.mSaveExif = false;
         mSingle.mCameraSurfaceView.takePhoto(filename, 720, 360, takePhotoListener);
         synchronized (mLock) {
@@ -337,12 +328,6 @@ public class PilotSDK implements PanoSurfaceViewListener {
     public static void takePhoto(String filename, int width, int height, boolean takeThumb, TakePhotoListener listener) {
         if (checkPanoSDKNotInit()) {
             return;
-        }
-        if (takeThumb) {
-            takeThumbPhoto(filename);
-            listener.thumbFilePath = "/sdcard/DCIM/Thumbs/" + filename + ".jpg";
-        } else {
-            PiPano.clearExifThumbnailBuffer();
         }
         mSingle.mCameraSurfaceView.takePhoto(filename, width, height, listener);
     }
@@ -383,55 +368,29 @@ public class PilotSDK implements PanoSurfaceViewListener {
         return PiPano.injectThumbnail(jpegFilename, thumbFilename);
     }
 
-    /**
-     * Switching the camera preview resolution
-     *
-     * @param resolution resolution
-     * @return true: resolution change
-     */
-    public static boolean changeCameraResolution(int[] resolution, ChangeResolutionListener listener) {
-        return changeCameraResolution("2", resolution, false, listener);
-    }
-
-    public static boolean changeCameraResolution(String cameraId, int[] resolution, boolean force, ChangeResolutionListener listener) {
-        int[] params = new int[resolution.length + 1];
-        params[resolution.length] = Integer.parseInt(cameraId);
-        System.arraycopy(resolution, 0, params, 0, resolution.length);
-        return changeCameraResolution(params, force, listener);
+    public static int injectThumbnail(File jpegFile, File thumbFile) {
+        return injectThumbnail(jpegFile.getAbsolutePath(), thumbFile.getAbsolutePath());
     }
 
     /**
      * Switching the camera preview resolution
-     *
-     * @param cameraParams resolution info
-     * @param force        force change
-     * @return true: resolution change
      */
-    public static boolean changeCameraResolution(int[] cameraParams, boolean force, ChangeResolutionListener listener) {
+    public static boolean changeCameraResolution(boolean force, ChangeResolutionListener listener) {
         if (checkPanoSDKNotInit()) {
             return false;
         }
-        Log.i(TAG, "changeCameraResolution cameraParams: " + Arrays.toString(cameraParams));
-        final String cameraId;
-        if (cameraParams.length < 4) {
-            cameraId = "2"; // 使用全景镜头
-        } else {
-            cameraId = String.valueOf(cameraParams[3]);
-        }
+        listener.forceChange = force;
+        Log.i(TAG, "change camera resolution camera params: " + listener.toParamsString());
         if (!force) {
-            if (cameraParams[0] == mSingle.mCameraSurfaceView.getPreviewWidth()
-                    && cameraParams[1] == mSingle.mCameraSurfaceView.getPreviewHeight()
-                    && cameraParams[2] == mSingle.mCameraSurfaceView.getPreviewFps()
-                    && (Objects.equals(cameraId, mSingle.mCameraSurfaceView.getCameraId()))) {
-                Log.d(TAG, "changeCameraResolution not change,ignore!");
-                mSingle.mCameraSurfaceView.post(() -> listener.onChangeResolution(cameraParams[0], cameraParams[1]));
+            if (listener.mWidth == mSingle.mCameraSurfaceView.getPreviewWidth()
+                    && listener.mHeight == mSingle.mCameraSurfaceView.getPreviewHeight()
+                    && listener.mFps == mSingle.mCameraSurfaceView.getPreviewFps()
+                    && (Objects.equals(listener.mCameraId, mSingle.mCameraSurfaceView.getCameraId()))) {
+                Log.d(TAG, "change camera resolution not change,ignore!");
+                mSingle.mCameraSurfaceView.post(() -> listener.onChangeResolution(listener.mWidth, listener.mHeight));
                 return false;
             }
         }
-        listener.mWidth = cameraParams[0];
-        listener.mHeight = cameraParams[1];
-        listener.mFps = cameraParams[2];
-        listener.mCameraId = cameraId;
         mSingle.mCameraSurfaceView.mPiPano.changeCameraResolution(listener);
         return true;
     }
@@ -516,7 +475,36 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.setAutoWhiteBalanceLock(value);
     }
 
+    public static void setAntiMode(@PiAntiMode String value) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "setAntiMode:" + value);
+        mSingle.mCameraSurfaceView.setAntiMode(value);
+    }
+
+    public static void setLockDefaultPreviewFps(boolean value) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        Log.i(TAG, "setLockDefaultPreviewFps:" + value);
+        mSingle.mCameraSurfaceView.setLockDefaultPreviewFps(value);
+    }
+
+    /**
+     * 预览时，需要准备的图像格式 ：支持 ImageFormat.JPEG , ImageFormat.RAW_SENSOR
+     *
+     * @param value {@link android.graphics.ImageFormat}
+     */
+    public static void setPreviewImageReaderFormat(int[] value) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        mSingle.mCameraSurfaceView.setPreviewImageReaderFormat(value);
+    }
+
     private static String mCurrentVideoFilePath = "";
+    private static RecordParams mRecordParams;
 
     private static MediaRecorderUtil mMediaRecorderUtil;
 
@@ -542,6 +530,20 @@ public class PilotSDK implements PanoSurfaceViewListener {
         return mSingle.mCameraSurfaceView.getPreviewFps();
     }
 
+    public static boolean isLockDefaultPreviewFps() {
+        if (checkPanoSDKNotInit()) {
+            return false;
+        }
+        return mSingle.mCameraSurfaceView.isLockDefaultPreviewFps();
+    }
+
+    public static CameraEnvParams getCurCameraEnvParams() {
+        if (checkPanoSDKNotInit()) {
+            return null;
+        }
+        return mSingle.mCameraSurfaceView.getCurCameraEnvParams();
+    }
+
     public static int getPreviewWidth() {
         if (checkPanoSDKNotInit()) {
             return 0;
@@ -551,28 +553,36 @@ public class PilotSDK implements PanoSurfaceViewListener {
 
     /**
      * Start recording.
-     *
-     * @param dirPath         Storage Folder
-     * @param filename        file name
-     * @param encode          encode
-     * @param videoWidth      video width
-     * @param videoHeight     video height
-     * @param fps             video fps
-     * @param channelCount    audio channel count
-     * @param useForGoogleMap Real-time stitching whether it is used for google map, this value for fisheye mp4 is not meaningful.
-     * @param memomotionRatio Time-lapse photography multiplier, if the current is 7fps,
-     *                        if the ratio is 70, then the frame will be reduced to 7/70 = 0.1fps,
-     *                        that is, 10s to record a frame, only effective for real-time splicing video.
-     * @param bitRate         bit rate
-     * @param audioEncoderExt audio attachment encoder
      * @return 0:no error
      */
     public static int startRecord(String dirPath, String filename,
                                   @PiVideoEncode String encode, int videoWidth, int videoHeight, int fps, int channelCount,
                                   boolean useForGoogleMap, int memomotionRatio,
-                                  int bitRate,
-                                  MediaRecorderListener listener,
-                                  IAudioEncoderExt audioEncoderExt, IAudioRecordExt audioRecordExt) {
+                                  int bitrate) {
+        RecordParams params = new RecordParams(new IRecordFilenameProxy() {
+            @NonNull
+            @Override
+            public File getParentPath() {
+                return new File(dirPath);
+            }
+
+            @NonNull
+            @Override
+            public String getBasicName() {
+                return filename;
+            }
+        }, videoWidth, videoHeight, fps, bitrate, channelCount);
+        params.encode = encode;
+        params.useForGoogleMap = useForGoogleMap;
+        params.memomotionRatio = memomotionRatio;
+        return startRecord(params);
+    }
+
+    /**
+     * Start recording.
+     * @return 0:no error
+     */
+    public static int startRecord(RecordParams params) {
         if (checkPanoSDKNotInit()) {
             return 1;
         }
@@ -584,14 +594,17 @@ public class PilotSDK implements PanoSurfaceViewListener {
             e.printStackTrace();
             return 11;
         }
-        stopRecord(false, false, "", "");
+        if (null != mRecordParams) {
+            stopRecord(false, false);
+        }
         //takeThumbPhoto(filename);
         final File file;
-        String videoFilePath = "";
-        boolean isRecordFisheye = !isLargePreviewSize || (memomotionRatio != 0 && !useForGoogleMap);
+        String videoFilePath;
+        boolean isRecordFisheye = !isLargePreviewSize || (params.memomotionRatio != 0 && !params.useForGoogleMap);
+        String dirPath = params.getDirPath();
         if (isRecordFisheye) {
             file = new File((TextUtils.isEmpty(dirPath) ? "/sdcard/DCIM/Videos/Unstitched/" : dirPath),
-                    filename + PiFileStitchFlag.unstitch);
+                    params.getBasicName() + PiFileStitchFlag.unstitch);
             if (!file.exists()) {
                 file.mkdirs();
             }
@@ -599,57 +612,67 @@ public class PilotSDK implements PanoSurfaceViewListener {
             cameraSurfaceView.mPiPano.setStabilizationFile(file.getAbsolutePath() + "/stabilization");
         } else {
             file = new File((TextUtils.isEmpty(dirPath) ? "/sdcard/DCIM/Videos/Stitched/" : dirPath),
-                    filename + PiFileStitchFlag.stitch + ".mp4");
+                    params.getBasicName() + PiFileStitchFlag.stitch + ".mp4");
             if (!file.getParentFile().exists()) {
                 file.mkdirs();
             }
             videoFilePath = file.getAbsolutePath();
         }
         mCurrentVideoFilePath = file.getAbsolutePath();
-        if (bitRate <= 0) {
-            bitRate = videoWidth * videoHeight * 3 * 2;
+        mRecordParams = params;
+        if (params.bitRate <= 0) {
+            params.bitRate = params.videoWidth * params.videoHeight * 3 * 2;
         }
 
-        if (memomotionRatio >= 0) {
-            PiPano.setMemomotionRatio(useForGoogleMap ? -memomotionRatio : memomotionRatio);
-        } else { // 慢动作，有编码器处理
-            PiPano.setMemomotionRatio(0);
+        if ("2".equals(mSingle.mCameraSurfaceView.getCameraId())) { // 全景视频
+            PiPano.setMemomotionRatio(params.memomotionRatio, params.useForGoogleMap);
+        } else {
+            PiPano.setMemomotionRatio(params.memomotionRatio, true);
         }
 
         int previewFps = cameraSurfaceView.getPreviewFps();
-        if (fps < 1) {
-            fps = previewFps;
+        if (params.fps < 1) {
+            params.fps = previewFps;
         }
-        //录像时，关闭 间隔拼接
-        if (!useForGoogleMap) {
+        if (!params.useForGoogleMap) {
             cameraSurfaceView.mPiPano.setParamReCaliEnable(0, true);
         }
 
         mMediaRecorderUtil = new MediaRecorderUtil();
-        mMediaRecorderUtil.setAudioEncoderExt(audioEncoderExt);
-        mMediaRecorderUtil.setAudioRecordExt(audioRecordExt);
-        Surface surface = mMediaRecorderUtil.startRecord(mSingle.mContext, videoFilePath, EncodeConverter.convertVideoMime(encode),
-                videoWidth, videoHeight, fps, bitRate, useForGoogleMap, memomotionRatio, channelCount, previewFps);
+        mMediaRecorderUtil.setAudioEncoderExt(params.audioEncoderExtList);
+        mMediaRecorderUtil.setAudioRecordExt(params.audioRecordExt);
+        Surface surface = mMediaRecorderUtil.startRecord(mSingle.mContext, videoFilePath,
+                EncodeConverter.convertVideoMime(params.encode),
+                params.videoWidth, params.videoHeight, params.fps, params.bitRate,
+                params.useForGoogleMap, params.memomotionRatio, params.channelCount, previewFps);
         if (surface == null) {
             return 2;
         }
-
-        //录鱼眼时,保存preview.mp4
+        if (params.saveConfig) {
+            FileConfig config = FileConfigHelper.self().create(mCurrentVideoFilePath, params);
+            if (config != null) {
+                config.setFittings(cameraSurfaceView.mLensProtected ? 2 : 1);
+                config.setFieldOfView((int) cameraSurfaceView.getFov());
+                FileConfigHelper.self().saveConfig(config);
+            }
+        }
         Surface thumbSurface = null;
         boolean previewEnabled = previewFps < 100; // 是否可开启预览
         if (isRecordFisheye && previewEnabled) {
             mMediaRecorderUtilForThumb = new MediaRecorderUtil();
-            thumbSurface = mMediaRecorderUtilForThumb.startRecord(mSingle.mContext, file.getAbsolutePath() + "/preview.mp4", MediaFormat.MIMETYPE_VIDEO_AVC,
-                    640, 320, fps, 640 * 320 * 2, false, memomotionRatio, 0, previewFps);
+            thumbSurface = mMediaRecorderUtilForThumb.startRecord(mSingle.mContext,
+                    file.getAbsolutePath() + "/preview.mp4", MediaFormat.MIMETYPE_VIDEO_AVC,
+                    640, 320, params.fps, 640 * 320 * 2,
+                    false, params.memomotionRatio, 0, previewFps);
         }
         if (isLargePreviewSize) {
-            cameraSurfaceView.mPiPano.setSurface(surface, 1);
+            cameraSurfaceView.mPiPano.setEncodeSurface(surface, 1);
         } else {
             mSingle.mCameraSurfaceView.startLowPreviewSize(false);
-            mSingle.mCameraSurfaceView.startRecord(surface, previewEnabled);
+            mSingle.mCameraSurfaceView.startCapture(surface, previewEnabled);
         }
         if (thumbSurface != null) {
-            cameraSurfaceView.mPiPano.setSurface(thumbSurface, 4);
+            cameraSurfaceView.mPiPano.setEncodeSurface(thumbSurface, 4);
         }
         return 0;
     }
@@ -657,44 +680,67 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * stop recording
      */
-    public static void stopRecord(boolean injectPanoMetadata, boolean isPano, String firmware, String artist) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-        PiPano.setMemomotionRatio(0);
-        mSingle.mCameraSurfaceView.mPiPano.setSurface(null, 1);
-        mSingle.mCameraSurfaceView.mPiPano.setSurface(null, 4);
-        if (!mSingle.mCameraSurfaceView.isLargePreviewSize()) {
-            if (injectPanoMetadata) {
-                mSingle.mCameraSurfaceView.startHighPreviewSize(false);
-                mSingle.mCameraSurfaceView.stopRecord();
+    public static void stopRecord(boolean injectPanoMetadata, boolean continuous) {
+        if (!checkPanoSDKNotInit()) {
+            PiPano.setMemomotionRatio(0, false);
+            mSingle.mCameraSurfaceView.mPiPano.setEncodeSurface(null, 1);
+            mSingle.mCameraSurfaceView.mPiPano.setEncodeSurface(null, 4);
+            if (!mSingle.mCameraSurfaceView.isLargePreviewSize()) {
+                if (injectPanoMetadata) {
+                    if (!continuous) {
+                        //不是分段视频停止，才更改为高清预览
+                        mSingle.mCameraSurfaceView.startHighPreviewSize(false);
+                    }
+                    mSingle.mCameraSurfaceView.stopCapture(!continuous);
+                }
             }
-        } /*else {
-                todo 等待处理
-            if (injectPanoMetadata){
-                mSingle.mCameraSurfaceView.startHighPreviewSize(true);
+        }
+        if (null != mRecordParams) {
+            boolean isPano = "2:1".equals(mRecordParams.aspectRatio);
+            String versionName = mRecordParams.mVersionName;
+            String artist = mRecordParams.mArtist;
+            if (mMediaRecorderUtil != null) {
+                mMediaRecorderUtil.stopRecord(injectPanoMetadata, isPano, versionName, artist);
             }
-        }*/
-        if (mMediaRecorderUtil != null) {
-            mMediaRecorderUtil.stopRecord(injectPanoMetadata, isPano, firmware, artist);
+            if (mMediaRecorderUtilForThumb != null) {
+                mMediaRecorderUtilForThumb.stopRecord(false, isPano, versionName, artist);
+                PiPano.spatialMediaFromOldMp4(mMediaRecorderUtil.getFilename(), mMediaRecorderUtilForThumb.getFilename(), isPano);
+            }
+            mMediaRecorderUtil = null;
+            mMediaRecorderUtilForThumb = null;
+            mRecordParams = null;
         }
-        if (mMediaRecorderUtilForThumb != null) {
-            mMediaRecorderUtilForThumb.stopRecord(false, isPano, firmware, artist);
-            PiPano.spatialMediaFromOldMp4(mMediaRecorderUtil.getFilename(), mMediaRecorderUtilForThumb.getFilename(), isPano);
+        if (!checkPanoSDKNotInit()) {
+            mSingle.mCameraSurfaceView.mPiPano.setStabilizationFile(null);
         }
-        mMediaRecorderUtil = null;
-        mMediaRecorderUtilForThumb = null;
-        mSingle.mCameraSurfaceView.mPiPano.setStabilizationFile(null);
     }
 
     /**
      * @return true: in record
      */
     public static boolean isInRecord() {
-        if (mMediaRecorderUtil != null) {
+        if (mRecordParams != null) {
             return true;
         }
-        return mSingle.mCameraSurfaceView.isInRecord();
+        return mSingle.mCameraSurfaceView.isInCapture();
+    }
+
+    public static int startCapture(Surface surface) {
+        if (checkPanoSDKNotInit()) {
+            return 1;
+        }
+        return mSingle.mCameraSurfaceView.startCapture(surface, true);
+    }
+
+    public static void stopCapture() {
+        stopCapture(true);
+    }
+
+    public static void stopCapture(boolean reStartPreview) {
+        if (checkPanoSDKNotInit()) {
+            return;
+        }
+        mSingle.mCameraSurfaceView.stopCapture(true, reStartPreview);
     }
 
     /**
@@ -748,10 +794,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @param encodeInputSurface Generally from MediaRecorder. getSurface() or MediaCodec. createInputSurface().
      */
     public static void setEncodeInputSurfaceForVideo(Surface encodeInputSurface) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-        mSingle.mCameraSurfaceView.mPiPano.setSurface(encodeInputSurface, 1);
+        setEncodeSurface(encodeInputSurface, 1);
     }
 
     /**
@@ -760,10 +803,7 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @param encodeInputSurface Generally from MediaRecorder. getSurface() or MediaCodec. createInputSurface()
      */
     public static void setEncodeInputSurfaceForLive(Surface encodeInputSurface) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-        mSingle.mCameraSurfaceView.mPiPano.setSurface(encodeInputSurface, 2);
+        setEncodeSurface(encodeInputSurface, 2);
     }
 
     /**
@@ -772,10 +812,14 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * @param encodeInputSurface Generally from MediaRecorder. getSurface() or MediaCodec. createInputSurface()
      */
     public static void setEncodeInputSurfaceForScreenLive(Surface encodeInputSurface) {
+        setEncodeSurface(encodeInputSurface, 5);
+    }
+
+    public static void setEncodeSurface(Surface surface, int type) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-        mSingle.mCameraSurfaceView.mPiPano.setSurface(encodeInputSurface, 5);
+        mSingle.mCameraSurfaceView.mPiPano.setEncodeSurface(surface, type);
     }
 
     /**
@@ -871,11 +915,12 @@ public class PilotSDK implements PanoSurfaceViewListener {
     /**
      * Whether to use lens protection.
      */
-    public static void setLensProtectedEnabled(boolean enabled) {
+    public static void setLensProtected(boolean enabled) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-        mSingle.mCameraSurfaceView.mPiPano.setLensProtectedEnabled(enabled);
+        Log.i(TAG, "setLensProtected:" + enabled);
+        mSingle.mCameraSurfaceView.setLensProtected(enabled);
     }
 
     /**
@@ -912,18 +957,9 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     public static void removePreviewCallBack() {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-        mSingle.mCameraSurfaceView.removePreviewCallBack();
     }
 
     public static void setPreviewCallback(CameraPreviewCallback callback) {
-        if (checkPanoSDKNotInit()) {
-            return;
-        }
-
-        mSingle.mCameraSurfaceView.setPreviewCallback(callback);
     }
 
     public static void setCameraFixShakeListener(CameraFixShakeListener cameraFixShakeListener) {
@@ -947,6 +983,9 @@ public class PilotSDK implements PanoSurfaceViewListener {
         mSingle.mCameraSurfaceView.removeCameraFixShakeListener(cameraFixShakeListener);
     }
 
+    /**
+     *
+     */
     public static Camera[] getCameras() {
         // TODO 已不适用
         return null;
@@ -1052,7 +1091,11 @@ public class PilotSDK implements PanoSurfaceViewListener {
     }
 
     public static void spatialMediaImpl(String filename, boolean isPano, String firmware, String artist) {
-        PiPano.spatialMediaImpl(filename, isPano, firmware, artist, 1.0f);
+        PiPano.spatialMediaImpl(filename, isPano, false, firmware, artist, 1.0f);
+    }
+
+    public static void spatialMediaImpl(String filename, boolean isPano, boolean spatialPanoAudio, String firmware, String artist) {
+        PiPano.spatialMediaImpl(filename, isPano, spatialPanoAudio, firmware, artist, 1.0f);
     }
 
     public static int spatialJpeg(String filename, double heading, Image image) {
@@ -1067,19 +1110,27 @@ public class PilotSDK implements PanoSurfaceViewListener {
      * restore high preview size.
      */
     public static void restoreHighPreviewSize() {
+        restoreHighPreviewSize(true);
+    }
+
+    public static void restoreHighPreviewSize(boolean reStartPreview) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-        mSingle.mCameraSurfaceView.startHighPreviewSize(true);
+        mSingle.mCameraSurfaceView.startHighPreviewSize(reStartPreview);
     }
 
     /**
      * start low preview size.
      */
     public static void startLowPreviewSize() {
+        startLowPreviewSize(true);
+    }
+
+    public static void startLowPreviewSize(boolean reStartPreview) {
         if (checkPanoSDKNotInit()) {
             return;
         }
-        mSingle.mCameraSurfaceView.startLowPreviewSize(true);
+        mSingle.mCameraSurfaceView.startLowPreviewSize(reStartPreview);
     }
 }

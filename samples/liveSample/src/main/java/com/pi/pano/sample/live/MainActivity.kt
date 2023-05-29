@@ -5,13 +5,12 @@ import android.util.Log
 import android.view.Surface
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import com.pi.pano.ChangeResolutionListener
+import com.pi.pano.DefaultChangeResolutionListener
+import com.pi.pano.DefaultPanoramaLiveChangeResolutionListener
 import com.pi.pano.PanoSDKListener
 import com.pi.pano.PilotSDK
-import com.pi.pano.annotation.PiPreviewMode
-import com.pi.pano.annotation.PiPushResolution
+import com.pi.pano.ResolutionParams
 import com.pi.pano.wrap.PreviewWrap
-import com.pi.pano.wrap.SampleLiveResolutionListener
 import com.pi.pipusher.IPusher
 import com.pi.pipusher.IPusherEncodeVideoListerner
 import com.pi.pipusher.IPusherStateListerner
@@ -61,8 +60,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initPreviewParameter() {
-        PreviewWrap.changeCameraResolutionForLive(
-            PiPushResolution._4K, "30", object : SampleLiveResolutionListener() {
+        PreviewWrap.changeResolution(
+            ResolutionParams.Factory.createParamsForPanoramaLive("30"),
+            object : DefaultPanoramaLiveChangeResolutionListener(false) {
                 override fun onChangeResolution(width: Int, height: Int) {
                     Log.d(TAG, "change resolution to:${width}*${height}")
                 }

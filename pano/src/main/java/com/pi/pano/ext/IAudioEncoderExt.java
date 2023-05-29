@@ -21,7 +21,7 @@ public interface IAudioEncoderExt {
      * @param outBuffer Output audio data
      * @return Output audio data length
      */
-    int decodeProcess(byte[] inBuffer, int length, byte[] outBuffer);
+    int encodeProcess(byte[] inBuffer, int length, byte[] outBuffer);
 
     /**
      * release resources.

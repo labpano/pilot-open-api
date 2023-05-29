@@ -12,7 +12,7 @@ public class PresentationSurfaceView extends SurfaceView {
         getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
-                relateSurfaceView.mPiPano.setSurface(holder.getSurface(), 3);
+                relateSurfaceView.mPiPano.setEncodeSurface(holder.getSurface(), 3);
             }
 
             @Override
@@ -21,7 +21,7 @@ public class PresentationSurfaceView extends SurfaceView {
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
-                relateSurfaceView.mPiPano.setSurface(null, 3);
+                relateSurfaceView.mPiPano.setEncodeSurface(null, 3);
             }
         });
     }

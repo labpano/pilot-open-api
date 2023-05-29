@@ -2,6 +2,7 @@ package com.pi.pano;
 
 import android.hardware.camera2.CaptureRequest;
 
+import com.pi.pano.annotation.PiAntiMode;
 import com.pi.pano.annotation.PiWhiteBalance;
 
 class ProUtils {
@@ -36,6 +37,21 @@ class ProUtils {
                 return PiWhiteBalance.daylight;
             case CaptureRequest.CONTROL_AWB_MODE_SHADE:
                 return PiWhiteBalance.cloudy_daylight;
+        }
+    }
+
+    static int convertRealAntiMode(@PiAntiMode String value) {
+        switch (value) {
+            case PiAntiMode.off:
+                return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF;
+            case PiAntiMode._50Hz:
+                return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ;
+            case PiAntiMode._60Hz:
+                return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ;
+            case PiAntiMode.auto:
+                return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO;
+            default:
+                throw new RuntimeException("Illegal value");
         }
     }
 }

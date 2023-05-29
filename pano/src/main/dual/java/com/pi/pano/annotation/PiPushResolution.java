@@ -1,26 +1,39 @@
 package com.pi.pano.annotation;
 
-import androidx.annotation.StringDef;
-
 /**
  * Push resolution.
  */
-@StringDef({
-        PiPushResolution._5_7K,
-        PiPushResolution._4K,
-        PiPushResolution._3K,
-})
 public @interface PiPushResolution {
     /**
-     * 5.7K
+     * 6K-未拼接
      */
-    String _5_7K = "_5.7K";
+    String _6K = PiResolution._5_7K;
     /**
-     * 4K,3840*1920
+     * 4K-包含帧率优先
      */
-    String _4K = "_4K";
+    String _4K = PiResolution._4K;
     /**
-     * 3K
+     * 4K-画质优先，降低帧率
      */
-    String _3K = "_3K";
+    String _4K_QUALITY = PiResolution._4K + "#2";
+    /**
+     * 高清
+     */
+    String HIGH = PiResolution._2_5K;
+    /**
+     * 1080，其码率和 HIGH 一致
+     */
+    String _1080P = PiResolution._1080P;
+    /**
+     * 标清
+     */
+    String STANDARD = PiResolution.STANDARD;
+    /**
+     * 720,其码率和 STANDARD 一致
+     */
+    String _720P = PiResolution._720P;
+    /**
+     * 流畅
+     */
+    String SMOOTH = PiResolution.SMOOTH;
 }

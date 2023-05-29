@@ -1,9 +1,10 @@
 package com.pi.pano;
 
 import android.content.Context;
-import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.util.Log;
+
+import androidx.annotation.NonNull;
 
 import java.io.File;
 import java.util.LinkedList;
@@ -24,139 +25,91 @@ public class StitchingUtil {
     }
 
     /**
-     * stitch state
+     * 拼接任务状态
      */
     public enum StitchState {
         /**
-         * start
+         * 已经开始
          */
         STITCH_STATE_START,
         /**
-         * pausing
+         * 正在暂停
          */
         STITCH_STATE_PAUSING,
         /**
-         * pause
+         * 已经暂停
          */
         STITCH_STATE_PAUSE,
         /**
-         * wati
+         * 正在排队等待
          */
         STITCH_STATE_WAIT,
         /**
-         * error
+         * 任务发生错误
          */
         STITCH_STATE_ERROR,
         /**
-         * starting
+         * 正在开始
          */
         STITCH_STATE_STARTING,
         /**
-         * stop
+         * 已经停止
          */
         STITCH_STATE_STOP,
         /**
-         * stopping
+         * 正在停止
          */
-        STITCH_STATE_STOPING
+        STITCH_STATE_STOPPING
     }
 
     /**
-     * stitch task
+     * 拼接任务
      */
     public class Task {
-        /**
-         * file
-         */
-        File mFile;
-
-        String mDestDirPath;
 
         /**
-         * stitch state
+         * 任务的拼接状态
          */
         volatile StitchState mState = StitchState.STITCH_STATE_PAUSE;
         /**
-         * progress
+         * 拼接进度
          */
         volatile float mProgress;
-
         /**
-         * error code
+         * 错误码
          */
         volatile int mErrorCode;
-
         /**
-         * delete last pause file
+         * 是否删除任务
          */
         volatile boolean mDeleteStitchingPauseFile = false;
-
-        int mWidth, mHeight, mFps, mBitRate;
-
+        /**
+         * 指定了这个时间戳,即只输出该时间戳的jpeg图像,单位是微秒
+         */
         long mStitchPictureInUs = -1;
 
-        /**
-         * mime
-         */
-        final String mMime;
+        @NonNull
+        final StitchVideoParams params;
 
-        /**
-         * use flow
-         */
-        final boolean mUseFlow;
-
-        File mOutputJpgFile;
-
-        /**
-         * @param file     file path
-         * @param progress progress
-         * @param width    output width
-         * @param height   output height
-         * @param fps      output fps
-         * @param bitRate  output bitRate
-         * @param mime     output mime
-         * @param useFlow  use flow
-         */
-        Task(File file, float progress, int width, int height, int fps, int bitRate, String mime, boolean useFlow) {
-            mFile = file;
-            mProgress = progress;
-            mWidth = width;
-            mHeight = height;
-            mFps = fps;
-            mBitRate = bitRate;
-            mMime = mime;
-            mUseFlow = useFlow;
-            mDestDirPath = file.getParentFile().getAbsolutePath();
-        }
-
-        Task(File file, int width, int height, long pictureTimestampUs, File outputJpgFile) {
-            mFile = file;
-            mWidth = width;
-            mHeight = height;
-            mFps = 30;
-            mStitchPictureInUs = pictureTimestampUs;
-            mMime = MediaFormat.MIMETYPE_VIDEO_AVC;
-            mOutputJpgFile = outputJpgFile;
-            mUseFlow = false;
-            mDestDirPath = file.getParentFile().getAbsolutePath();
+        public Task(@NonNull StitchVideoParams params) {
+            this.params = params;
         }
 
         /**
-         * get error code
+         * 获取拼接错误码,当拼接状态为STITCH_STATE_ERROR的时候,可通过这个接口获取具体的错误信息
          *
-         * @return error code
+         * @return 错误码
          */
         public int getErrorCode() {
             return mErrorCode;
         }
 
         /**
-         * Start to specify splicing tasks. Only one splicing task can be executed at the same time.
-         * If other tasks are being executed, the status of the specified task is STITCH_STATE_WAIT,
-         * otherwise the status of the specified task is STITCH_STATE_START.
+         * 开始指定拼接任务,拼接任务同时只能执行一个,如果有其它任务正在执行,那么指定任务的状态为
+         * STITCH_STATE_WAIT,否则指定任务的状态为STITCH_STATE_START
          */
         public void startStitchTask() {
-            Log.i(TAG, "startStitchTask " + mFile + "  state--->" + mState);
+            Log.i(TAG, "startStitchTask " + params.srcDir + "  state--->" + mState);
             if (mState == StitchState.STITCH_STATE_PAUSE) {
                 changeState(StitchState.STITCH_STATE_WAIT);
             }
@@ -166,10 +119,10 @@ public class StitchingUtil {
         }
 
         /**
-         * Pause the specified splicing task to make its status as STITCH_ STATE_ PAUSING.
+         * 暂停指定拼接任务,使其状态为STITCH_STATE_PAUSING
          */
         public void pauseStitchTask() {
-            Log.i(TAG, "pauseStitchTask " + mFile);
+            Log.i(TAG, "pauseStitchTask " + params.srcDir);
             if (mState == StitchState.STITCH_STATE_START ||
                     mState == StitchState.STITCH_STATE_STARTING ||
                     mState == StitchState.STITCH_STATE_WAIT) {
@@ -182,7 +135,7 @@ public class StitchingUtil {
                 if (mStitchingListener != null) {
                     mStitchingListener.onStitchingDeleteDeleting(this);
                 }
-                File pauseFile = new File(mFile, "stitching_pause.mp4");
+                File pauseFile = new File(params.srcDir, "stitching_pause.mp4");
                 if (pauseFile.exists()) {
                     if (pauseFile.delete()) {
                         mDeleteStitchingPauseFile = false;
@@ -198,7 +151,7 @@ public class StitchingUtil {
          * Delete a task from the task queue.
          */
         public void deleteStitchTask() {
-            Log.i(TAG, "deleteStitchTask " + mFile);
+            Log.i(TAG, "deleteStitchTask " + params.srcDir);
             mDeleteStitchingPauseFile = true;
             //先删除一下试试,文件有可能被占用,如果被占用,那么一会再删除
             deleteStitchingPauseFile();
@@ -217,7 +170,7 @@ public class StitchingUtil {
          * Topping a splicing task.
          */
         public void topStitchTask() {
-            Log.i(TAG, "stickStitchTask " + mFile);
+            Log.i(TAG, "stickStitchTask " + params.srcDir);
             synchronized (mTaskList) {
                 if (mTaskList.getFirst() == this) {
                     return;
@@ -231,11 +184,7 @@ public class StitchingUtil {
         }
 
         public File getFile() {
-            return mFile;
-        }
-
-        public File getOutputJpgFile() {
-            return mOutputJpgFile;
+            return params.srcDir;
         }
 
         public StitchState getStitchState() {
@@ -247,7 +196,7 @@ public class StitchingUtil {
         }
 
         void changeState(StitchState state) {
-            Log.i(TAG, "changeState " + mState + "=>" + state + " file:" + mFile);
+            Log.i(TAG, "changeState " + mState + "=>" + state + " file:" + params.srcDir);
             mState = state;
             if (mStitchingListener != null) {
                 mStitchingListener.onStitchingStateChange(this);
@@ -280,104 +229,56 @@ public class StitchingUtil {
     /**
      * Add a task to the queue.
      *
-     * @param file file
-     * @param mime mime
-     */
-    public void addStitchTask(File file, String mime) {
-        addStitchTask(file, 7680, 3840, 30, 0, mime, false);
-    }
-
-    /**
-     * Add a task to the queue.
-     *
-     * @param file    file
-     * @param width   width
-     * @param height  height
-     * @param fps     fps
-     * @param bitrate bitrate
-     * @param mime    mime
-     * @param useFlow use flow
+     * @param file    指向要拼接的文件夹
+     * @param width   拼接后视频的宽
+     * @param height  拼接后视频的高
+     * @param fps     拼接后视频的帧率
+     * @param bitrate 原视频码率
+     * @param mime    编码方式
+     * @param useFlow 是否使用光流拼接
      */
     public void addStitchTask(File file, int width, int height, int fps, int bitrate, String mime, boolean useFlow) {
-        Log.i(TAG, "add a task dir: " + file.getName());
-        if (width <= 0 || height <= 0 || fps <= 0) {
-            Log.e(TAG, "addStitchTask params invalid: width " + width + " height " + height + " fps " + fps);
+        StitchVideoParams params = StitchVideoParams.Factory.createParams(file, width, height, fps, bitrate, mime, useFlow);
+        addStitchTask(params);
+    }
+
+    public void addStitchTask(@NonNull StitchVideoParams params) {
+        if (params.width <= 0 || params.height <= 0 || params.fps <= 0 ||
+                !params.srcDir.isDirectory()) {
+            Log.e(TAG, "addStitchTask params invalid: " + params);
         }
-        if (!file.exists()) {
-            Log.e(TAG, "addStitchTask not exit dir: " + file.getName());
+        if (!params.srcDir.exists()) {
+            Log.e(TAG, "addStitchTask not exit dir: " + params.srcDir.getName());
             return;
         }
         for (Task task : mTaskList) {
-            if (task.mFile.compareTo(file) == 0) {
-                Log.e(TAG, "addStitchTask already exit dir: " + file.getName());
+            if (task.params.srcDir.compareTo(params.srcDir) == 0) {
+                Log.e(TAG, "addStitchTask already exit dir: " + params.srcDir.getName());
                 return;
             }
         }
         float progress = 0;
-        File pauseFile = new File(file, "stitching_pause.mp4");
+        File pauseFile = new File(params.srcDir, "stitching_pause.mp4");
         if (pauseFile.exists()) {
-            progress = getDuring(pauseFile.getAbsolutePath()) * 100 / getDuring(new File(file, "0.mp4").getAbsolutePath());
+            progress = getDuring(pauseFile.getAbsolutePath()) * 100f /
+                    getDuring(new File(params.srcDir, "0.mp4").getAbsolutePath());
         }
-        mTaskList.add(new Task(file, progress, width, height, fps, bitrate, mime, useFlow));
+        params.progress = progress;
+        Log.d(TAG, "addStitchTask ==> " + params);
+        mTaskList.add(new Task(params));
     }
 
     /**
-     * Add a task to the queue.
+     * 获取拼接任务队列
      *
-     * @param stiDirName            file
-     * @param width                 width
-     * @param height                height
-     * @param pictureTimestampUsUTC The utc timestamp of the jpeg image you want to output, in microseconds.
-     * @param outputJpgFilename     file path of output jpeg file
-     */
-    public void addStitchTask(String stiDirName, int width, int height, long pictureTimestampUsUTC, String outputJpgFilename) {
-        File file = new File(stiDirName);
-        Log.i(TAG, "Add a task dir: " + file.getName() + " timestamp: " + pictureTimestampUsUTC);
-        if (width <= 0 || height <= 0 || pictureTimestampUsUTC < 0) {
-            Log.e(TAG, "addStitchTask params invalid: width " + width + " height " + height +
-                    " pictureTimestampUsUTC " + pictureTimestampUsUTC);
-        }
-        if (!file.exists()) {
-            Log.e(TAG, "addStitchTask not exists dir: " + file.getName());
-            return;
-        }
-        for (Task task : mTaskList) {
-            if (task.getOutputJpgFile() == null && task.mFile.compareTo(file) == 0) {
-                Log.e(TAG, "addStitchTask already exists dir: " + file.getName());
-                return;
-            }
-        }
-        File mp4File0 = new File(file, "0.mp4");
-        if (!mp4File0.exists()) {
-            Log.e(TAG, "addStitchTask not exists 0.mp4: " + file.getName());
-            return;
-        }
-        long firstFrameUsUTC = PiPano.getFirstFrameUsUTC(mp4File0.getAbsolutePath());
-        long during = getDuring(mp4File0.getAbsolutePath());
-        long pictureTimestampUs = pictureTimestampUsUTC - firstFrameUsUTC;
-        if (pictureTimestampUs > during) {
-            Log.e(TAG, "pictureTimestampUs(" + pictureTimestampUs + ") > during(" + during + ")");
-            pictureTimestampUs = during - 500000;
-        }
-        if (pictureTimestampUs < 0) {
-            Log.e(TAG, "pictureTimestampUsUTC(" + pictureTimestampUsUTC + ") < firstFrameUsUTC(" + firstFrameUsUTC + ")");
-            pictureTimestampUs = 0;
-        }
-        Log.i(TAG, "firstFrameUs: " + (pictureTimestampUsUTC - firstFrameUsUTC));
-        mTaskList.add(new Task(file, width, height, pictureTimestampUs, new File(outputJpgFilename)));
-    }
-
-    /**
-     * Get task queue
-     *
-     * @return task queue
+     * @return 拼接任务队列
      */
     public List<Task> getStitchTaskQueue() {
         return mTaskList;
     }
 
     /**
-     * Start all tasks except STITCH_STATE_START setting bit STITCH of all tasks in START status_STATE_WAIT
+     * 开始所有拼接任务,将除了STITCH_STATE_START状态的所有任务的状态设置位STITCH_STATE_WAIT
      */
     public void startAllStitchTask() {
         Log.i(TAG, "startAllStitchTask");

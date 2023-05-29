@@ -5,25 +5,16 @@ import android.graphics.PixelFormat;
 import com.pi.pano.annotation.PiPhotoFileFormat;
 
 import java.io.File;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Take photo listener.
  */
 public abstract class TakePhotoListener {
+    public CaptureParams mParams;
+
     long mTimestamp;
     int mStitchPhotoWidth;
     int mStitchPhotoHeight;
-
-    /**
-     * (Slam take photos) Record the information of the fixed point
-     */
-    public boolean mMakeSlamPhotoPoint = false;
-
-    /**
-     * Jpeg quality.
-     */
-    public int mJpegQuilty = 100;
 
     /**
      * save exif.
@@ -34,44 +25,18 @@ public abstract class TakePhotoListener {
      * thumb
      */
     boolean mIsThumb = false;
-    String thumbFilePath;
 
-    /**
-     * Whether the captured images are stitch images。
-     */
     public boolean mIsStitched;
 
-    /**
-     * hdr photo count
-     */
-    public int mHDRImageCount;
-
-    volatile boolean mHDRError;
-
-    /**
-     * Stitch photo saving folder path.
-     */
-    public String mStitchDirPath = "/sdcard/DCIM/Photos/Stitched/";
-
-    /**
-     * Unstitch photo saving folder path.
-     */
-    public String mUnStitchDirPath = "/sdcard/DCIM/Photos/Unstitched/";
-
-    /**
-     * save hdr source file.
-     */
-    public boolean mSaveHdrSourceFile;
-    /**
-     * Number of frames initially ignored
-     */
     public int mInitSkipFrame;
-    /**
-     * Take pictures after ignoring frames.
-     */
     public int mSkipFrame;
 
     public String mFilename;
+    String thumbFilePath;
+
+    public File mHdrSourceDir;
+    public int mHdrSourceFileCount = 0;
+    volatile boolean mHDRError;
 
     /**
      * Stitch file
@@ -83,55 +48,9 @@ public abstract class TakePhotoListener {
     public File mUnStitchFile;
 
     /**
-     * Latitude
-     */
-    public double mLatitude;
-
-    /**
-     * Longitude
-     */
-    public double mLongitude;
-
-    /**
-     * Altitude
-     */
-    public int mAltitude;
-
-    /**
-     * Heading
-     */
-    public double mHeading;
-
-    /**
-     * Artist
-     */
-    public String mArtist;
-    /**
-     * Software version name.
-     */
-    public String mSoftware;
-
-    /**
      * Image format.
      */
     public int mImageFormat = PixelFormat.RGBA_8888;
-    /**
-     * File format.
-     */
-    @PiPhotoFileFormat
-    public String mFileFormat = PiPhotoFileFormat.jpg;
-
-    int hdr_exposureTime;
-    int hdr_iso;
-    int hdr_ev;
-    int hdr_wb;
-
-    private int totalTakeCount = 1;
-    private final AtomicInteger takeCount = new AtomicInteger(0);
-
-    public void setTotalTakeCount(int count) {
-        totalTakeCount = count;
-    }
 
     /**
      * Parameter setting callback before HDR photography acquisition
@@ -152,9 +71,7 @@ public abstract class TakePhotoListener {
     }
 
     void dispatchTakePhotoComplete(int errorCode) {
-        if (takeCount.incrementAndGet() >= totalTakeCount) {
-            onTakePhotoComplete(errorCode);
-        }
+        onTakePhotoComplete(errorCode);
     }
 
     /**
@@ -163,5 +80,12 @@ public abstract class TakePhotoListener {
      * @param errorCode error code
      */
     protected void onTakePhotoComplete(int errorCode) {
+        if (errorCode == 0 && mSaveExif) {
+            if (null != mUnStitchFile && mUnStitchFile.isFile() &&
+                    mUnStitchFile.getName().endsWith(PiPhotoFileFormat.jpg) &&
+                    mParams.hdrCount <= 0) {
+                ThumbnailGenerator.injectExifThumbnailForUnStitch(mUnStitchFile);
+            }
+        }
     }
 }

@@ -5,16 +5,20 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import com.pi.pano.CaptureParams
+import com.pi.pano.DefaultPhotoChangeResolutionListener
 import com.pi.pano.PanoSDKListener
 import com.pi.pano.PilotSDK
-import com.pi.pano.TakePhotoListener
-import com.pi.pano.annotation.PiPhotoResolution
-import com.pi.pano.wrap.PreviewWrap
-import com.pi.pano.wrap.SampleChangeResolutionListener
+import com.pi.pano.ResolutionParams
+import com.pi.pano.annotation.PiResolution
 import com.pi.pano.sample.photo.R
+import com.pi.pano.wrap.IPhotoListener
+import com.pi.pano.wrap.PhotoWrap
+import com.pi.pano.wrap.PreviewWrap
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 private val TAG = MainActivity::class.java.simpleName
 
@@ -37,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPano() {
         // setup pano into your view containers
-        mPilotSDK = PreviewWrap.initPanoView(
+        mPilotSDK = PilotSDK(
             findViewById(R.id.vg_preview),
             object : PanoSDKListener {
                 override fun onPanoCreate() {
@@ -59,9 +63,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initPreviewParameter() {
-        PreviewWrap.changeCameraResolutionForPhoto(
-            PiPhotoResolution._5_7K // the resolution you need, it includes the frame rate
-            , object : SampleChangeResolutionListener() {
+        PreviewWrap.changeResolution(ResolutionParams.Factory.createParamsForPhoto(PiResolution._5_7K),
+            object : DefaultPhotoChangeResolutionListener() {
                 override fun onChangeResolution(width: Int, height: Int) {
                     Log.d(TAG, "change resolution to:${width}*${height}")
                 }
@@ -72,23 +75,32 @@ class MainActivity : AppCompatActivity() {
         val progressDialog = ProgressDialog(this);
         progressDialog.show()
         progressDialog.setMessage("Take Photo...")
-        PilotSDK.takePhoto(
-            generateFileName() // photo file name
-            , 4096
-            , 2048
-            ,true
-            , object : TakePhotoListener() {
-                override fun onTakePhotoComplete(errorCode: Int) {
-                    super.onTakePhotoComplete(errorCode)
-                    Log.d(TAG, "take photo complete,${errorCode}")
-                    // take photo complete, you can get the file where you specify path,if it succeeds
-                    progressDialog.dismiss()
-                }
-            }.apply {
-                mUnStitchDirPath =
-                    getExternalFilesDir("myPhotos")!!.absolutePath + File.separator // specify the directory where the file is stored
+
+        val params =
+            CaptureParams.Factory.createParams(0, generateFileName(), PiResolution._5_7K)
+        params.unStitchDirPath =
+            getExternalFilesDir("myPhotos")!!.absolutePath + File.separator // specify the directory where the file is stored
+        PhotoWrap.takePhoto(params, object :
+            IPhotoListener {
+            override fun onTakeStart() {
             }
-        )
+
+            override fun onTakeStart(index: Int) {
+            }
+
+            override fun onTakeSuccess(
+                change: Boolean,
+                simpleFileName: String?,
+                stitchFile: File?,
+                unStitchFile: File?
+            ) {
+                progressDialog.dismiss()
+            }
+
+            override fun onTakeError(change: Boolean, errorCode: String?) {
+                progressDialog.dismiss()
+            }
+        })
     }
 
     private fun generateFileName(): String {

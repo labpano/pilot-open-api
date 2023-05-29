@@ -1,4 +1,4 @@
-package com.pi.pano.wrap;
+package com.pi.pano.wrap.annotation;
 
 import androidx.annotation.StringDef;
 

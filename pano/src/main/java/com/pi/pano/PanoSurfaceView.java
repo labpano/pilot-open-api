@@ -22,6 +22,7 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
     PanoSurfaceViewListener mPanoSurfaceViewListener;
     boolean mEnableTouchEvent = true;
     protected int mLensCorrectionMode;
+    protected boolean mLensProtected = false;
     boolean mDelayOnCreateEvent;
     Context mContext;
 
@@ -31,6 +32,15 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
      * surface创建
      */
     private boolean mSurfaceCreated = false;
+
+    protected float mFov;
+    private final Runnable mLongClickRunnable = () -> {
+        try {
+            Input.reset2();
+        } catch (Exception ignore) {
+        }
+    };
+    private boolean hasPostLongClick = false;
 
     public PanoSurfaceView(Context context) {
         this(context, null);
@@ -54,7 +64,7 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
                     return true;
                 }
             });
-
+            mGestureDetector.setIsLongpressEnabled(false);
             getHolder().addCallback(new SurfaceHolder.Callback() {
                 @Override
                 public void surfaceCreated(SurfaceHolder holder) {
@@ -69,8 +79,8 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
                     }
                     if (!mSurfaceCreated) {
                         mSurfaceCreated = true;
-                        mPiPano = new OpenGLThread(PanoSurfaceView.this, context);
-                        mPiPano.setSurface(holder.getSurface(), 0);
+                        mPiPano = new OpenGLThread(PanoSurfaceView.this, context, (PanoSurfaceView.this instanceof CameraSurfaceView));
+                        mPiPano.setEncodeSurface(holder.getSurface(), 0);
                     }
                 }
 
@@ -88,9 +98,22 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
         }
     }
 
+    void initLensProtected(boolean enabled) {
+        mLensProtected = enabled;
+    }
+
+    public void setLensProtected(boolean enabled) {
+        if (mLensProtected != enabled) {
+            mLensProtected = enabled;
+            mPiPano.setLensProtected(mLensProtected);
+        }
+    }
+
     @Override
     public void onPiPanoInit() {
         Log.i(TAG, "surface created");
+        mPiPano.setLensProtected(mLensProtected);
+        resetParamReCaliEnable();
         DisplayManager displayManager = (DisplayManager) mContext.getSystemService(Context.DISPLAY_SERVICE);
         Display[] presentationDisplays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
         if (presentationDisplays.length > 0) {
@@ -119,11 +142,6 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
         }
     }
 
-    /**
-     * Whether to enable/disable touch events
-     *
-     * @param b true: turn on; false:turn off
-     */
     public void setEnableTouchEvent(boolean b) {
         mEnableTouchEvent = b;
     }
@@ -136,9 +154,14 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
                 pointPoses[i * 2] = event.getX(i);
                 pointPoses[i * 2 + 1] = event.getY(i);
             }
-            Input.onTouchEvent(event.getAction() & MotionEvent.ACTION_MASK, event.getPointerCount(), event.getEventTime() * 1000000, pointPoses);
+            Input.onTouchEvent2(event.getAction() & MotionEvent.ACTION_MASK, event.getPointerCount(), event.getEventTime() * 1000000, pointPoses);
 
             mGestureDetector.onTouchEvent(event);
+            if (MotionEvent.ACTION_UP == event.getAction() || MotionEvent.ACTION_MOVE == event.getAction()) {
+                handleLongClick(false);
+            } else if (MotionEvent.ACTION_DOWN == event.getAction()) {
+                handleLongClick(true);
+            }
         }
         return true;
     }
@@ -168,8 +191,9 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
      * @param cameraDistance 0~400 Distance from camera to ball center.
      */
     public void setPreviewMode(@PiPreviewMode int mode, float rotateDegree, boolean playAnimation, float fov, float cameraDistance) {
-        Input.setPreviewMode(mode, rotateDegree, playAnimation, fov, cameraDistance);
+        Input.setPreviewMode2(mode, rotateDegree, playAnimation, fov, cameraDistance);
         mPanoSurfaceViewListener.onPanoModeChange(Input.getPreviewMode());
+        mFov = fov;
     }
 
     @Override
@@ -332,5 +356,30 @@ abstract class PanoSurfaceView extends SurfaceView implements PiPano.PiPanoListe
      */
     protected float range(final int percentage, final float start, final float end) {
         return (end - start) * percentage / 200.0f + start;
+    }
+
+    protected void resetParamReCaliEnable() {
+        if (null != mPiPano) {
+            //The default splicing distance measurement is 1 time
+            mPiPano.setParamReCaliEnable(-1, true);
+        }
+    }
+
+    public boolean isLensProtected() {
+        return mLensProtected;
+    }
+
+    public float getFov() {
+        return mFov;
+    }
+
+    private void handleLongClick(boolean start) {
+        if (start) {
+            postDelayed(mLongClickRunnable, 2000);
+            hasPostLongClick = true;
+        } else if (hasPostLongClick) {
+            removeCallbacks(mLongClickRunnable);
+            hasPostLongClick = false;
+        }
     }
 }

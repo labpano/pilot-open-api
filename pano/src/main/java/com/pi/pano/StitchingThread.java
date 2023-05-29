@@ -5,11 +5,10 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.Surface;
 
+import androidx.annotation.NonNull;
+
 import java.io.File;
 
-/**
- * Stitch thread.
- */
 public class StitchingThread extends Thread implements PiPano.PiPanoListener {
     private final String TAG = "StitchingThread";
 
@@ -40,7 +39,6 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
     private long mStartTime;
     private final StitchingUtil mStitchingUtil;
     private final StitchingNative mStitchingNative;
-    private ImageProcess mImageProcess;
 
     StitchingThread(Context context, StitchingUtil stitchingUtil) {
         mContext = context;
@@ -55,10 +53,10 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
 
     private void startTask() {
         mCurrentTask.changeState(StitchingUtil.StitchState.STITCH_STATE_STARTING);
-        Log.i(TAG, "processNextTask file: " + mCurrentTask.mFile.getName());
+        Log.i(TAG, "processNextTask file: " + mCurrentTask.params.srcDir.getName());
         mCurrentTask.mErrorCode = 0;
 
-        File stitchedVideo = new File(mCurrentTask.mFile + "/stitching.mp4");
+        File stitchedVideo = new File(mCurrentTask.params.srcDir + "/stitching.mp4");
         //删掉文件夹中原来的stitching.mp4
         if (stitchedVideo.exists()) {
             if (!stitchedVideo.delete()) {
@@ -67,70 +65,34 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
             }
         }
 
-        mPiPano = new OpenGLThread(this, mContext);
+        mPiPano = new OpenGLThread(this, mContext, false);
         while (!mPiPano.mHasInit) {
             SystemClock.sleep(5);
         }
         // 保护镜
-        mPiPano.setLensProtectedEnabled(SystemPropertiesProxy.getInt("persist.dev.pano.lens_protected", 0) > 0);
-        File stabilizationFile = new File(mCurrentTask.mFile.getPath() + "/stabilization");
-        mPiPano.useGyroscope(stabilizationFile.exists(), mCurrentTask.mFile.getPath());
+        mPiPano.setLensProtected(mCurrentTask.params.lensProtected);
+        File stabilizationFile = new File(mCurrentTask.params.srcDir.getPath() + "/stabilization");
+        mPiPano.useGyroscope(stabilizationFile.exists(), mCurrentTask.params.srcDir.getPath());
         //setStitchingConfig();
-        int ret = mStitchingNative.startStitching(mCurrentTask.mFile.getAbsolutePath(), mPiPano);
+        int ret = mStitchingNative.startStitching(mCurrentTask.params.srcDir.getAbsolutePath(), mPiPano);
         if (ret != 0) {
             setErrorCode(ret, "frameExtractor init error");
             return;
         }
         mPiPano.setParamReCaliEnable(3, false);
-        if (mCurrentTask.mOutputJpgFile == null) {
-            //encorder
-            mStitchingRecorder = new StitchingRecorder(mPiPano);
-            Surface surface = mStitchingRecorder.init(mCurrentTask.mFile, mCurrentTask.mDestDirPath,
-                    mCurrentTask.mWidth, mCurrentTask.mHeight, mCurrentTask.mFps, mCurrentTask.mBitRate, mCurrentTask.mMime);
-            if (surface == null) {
-                setErrorCode(STITCH_ERROR_RECORDER_INIT, "stitchingRecorder init error");
-                return;
-            }
-            mPiPano.setSurface(surface, 1);
-            if (!mStitchingRecorder.start()) {
-                setErrorCode(STITCH_ERROR_RECORDER_START, "stitchingRecorder start error");
-                return;
-            }
-        } else {
-            TakePhotoListener takePhotoListener = new TakePhotoListener() {
-                @Override
-                protected void onTakePhotoComplete(int errorCode) {
-                    mImageProcess = null;
-                }
-            };
-            takePhotoListener.mFilename = mCurrentTask.mOutputJpgFile.getName().replace(".jpg", "");
-            takePhotoListener.mUnStitchDirPath = mCurrentTask.mOutputJpgFile.getParent();
-            mImageProcess = new ImageProcess(mCurrentTask.mWidth,
-                    mCurrentTask.mHeight, takePhotoListener.mImageFormat, 0, takePhotoListener);
-            mPiPano.setEncodePhotoSurface(mImageProcess.getImageReaderSurface());
+        //encorder
+        mStitchingRecorder = new StitchingRecorder();
+        Surface surface = mStitchingRecorder.init(mCurrentTask.params);
+        if (surface == null) {
+            setErrorCode(STITCH_ERROR_RECORDER_INIT, "stitchingRecorder init error");
+            return;
+        }
+        mPiPano.setEncodeSurface(surface, 1);
+        if (!mStitchingRecorder.start()) {
+            setErrorCode(STITCH_ERROR_RECORDER_START, "stitchingRecorder start error");
         }
     }
 
-    private void setStitchingConfig() {
-        StitchingConfig config = StitchingConfig.getConfigure(StitchingConfig.getStitchingConfigFile(new File(mCurrentTask.mFile.getPath())));
-        if (config != null) {
-            mPiPano.setEdition(true);
-            float highlight = StitchingConfig.highLightConvert(config.mHighlights + 100);
-            mPiPano.setHighlights(highlight);
-            float shadow = StitchingConfig.shadowsConvert(config.mShadow + 100);
-            mPiPano.setShadows(shadow);
-            float brightness = StitchingConfig.brightnessConvert(config.mBright + 100);
-            mPiPano.setBrightness(brightness);
-            float saturation = StitchingConfig.saturationConvert(config.mSaturation + 100);
-            mPiPano.setSaturation(saturation);
-            float gamma = StitchingConfig.gammaConvert(config.mGamma + 100);
-            mPiPano.setGamma(gamma);
-            float temperature = StitchingConfig.tempeConvert(config.mTemperature + 100);
-            mPiPano.setTemperature(temperature < 5000 ? (float) (0.0004 * (temperature - 5000.0)) : (float) (0.00006 * (temperature - 5000.0)));
-        } else {
-            mPiPano.setEdition(false);
-        }
-    }
 
     private boolean processNextTask() {
         release();
@@ -166,7 +128,7 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
         mStitchingNative.deleteFrameExtractor();
         if (mCurrentTask != null) {
             mCurrentTask.deleteStitchingPauseFile();
-            if (mCurrentTask.mState == StitchingUtil.StitchState.STITCH_STATE_STOPING) {
+            if (mCurrentTask.mState == StitchingUtil.StitchState.STITCH_STATE_STOPPING) {
                 mCurrentTask.changeState(StitchingUtil.StitchState.STITCH_STATE_STOP);
                 mCurrentTask.deleteStitchTask();
             } else if (mCurrentTask.mState == StitchingUtil.StitchState.STITCH_STATE_PAUSING) {
@@ -185,15 +147,14 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
         while (true) {
             mStitchingUtil.checkHaveNextTask();
             if (processNextTask()) {
-                long during = StitchingUtil.getDuring(mCurrentTask.mFile + "/0.mp4");
+                long during = StitchingUtil.getDuring(mCurrentTask.params.srcDir + "/0.mp4");
                 //计算上次暂停的时间,如果是拼接视频,那么直接计算上次暂停的时间
                 //如果是拼接视频中某一帧的图像,这个暂停时间指的是该图像在视频中的时间戳
                 long pauseTimeStamp = -1;
                 if (mStitchingRecorder != null) {
                     pauseTimeStamp = mStitchingRecorder.getPauseTimeStamp();
-                } else if (mCurrentTask.mOutputJpgFile != null) {
-                    pauseTimeStamp = mCurrentTask.mStitchPictureInUs;
                 }
+                Log.d(TAG, "nextTask check dur:" + during + "pauseTime:" + pauseTimeStamp);
                 //如果时暂停重新开始,那么StitchingFrameExtractor要seek到上次停止的时间戳的前一个keyframe
                 if (pauseTimeStamp != -1) {
                     mStitchingNative.seekToPreviousKeyFrame(pauseTimeStamp);
@@ -201,9 +162,9 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
                 while (mCurrentTask.getStitchState() == StitchingUtil.StitchState.STITCH_STATE_START) {
                     if (!mStitchingNative.extractorOneFrame()) {
                         //拼接完成
-                        Log.i(TAG, "Process finish video: " + mCurrentTask.mFile.getName() +
+                        Log.i(TAG, "Process finish video: " + mCurrentTask.params.srcDir.getName() +
                                 " take time: " + (System.currentTimeMillis() - mStartTime));
-                        mCurrentTask.changeState(StitchingUtil.StitchState.STITCH_STATE_STOPING);
+                        mCurrentTask.changeState(StitchingUtil.StitchState.STITCH_STATE_STOPPING);
                         break;
                     }
                     //只有当前的时间戳大于上次暂停的时间戳,这一帧才会被编码
@@ -213,23 +174,19 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
                         //一帧surface到编码器,不然会丢帧
                         if (mStitchingRecorder != null) {
                             mStitchingRecorder.checkSemaphore();
-                        } else if (mCurrentTask.mOutputJpgFile != null) {
-                            mCurrentTask.changeState(StitchingUtil.StitchState.STITCH_STATE_STOPING);
                         }
                     }
                     mStitchingNative.decodeOneFrame(renderEncodeFrame);
-                    mCurrentTask.mProgress = mStitchingNative.getExtractorSampleTime(0) * 100.0f / during;
+                    float pro = mStitchingNative.getExtractorSampleTime(0) * 100.0f / during;
+                    if (pro > mCurrentTask.mProgress) {
+                        mCurrentTask.mProgress = pro;
+                    }
                     if (mCurrentTask.mProgress > 100) {
                         mCurrentTask.mProgress = 100;
                     }
                     if (mStitchingUtil.mStitchingListener != null &&
                             mCurrentTask.getStitchState() == StitchingUtil.StitchState.STITCH_STATE_START) {
                         mStitchingUtil.mStitchingListener.onStitchingProgressChange(mCurrentTask);
-                    }
-                }
-                if (mCurrentTask.mOutputJpgFile != null) {
-                    while (mImageProcess != null) { // wait for take photo complete
-                        SystemClock.sleep(100);
                     }
                 }
                 Log.v(TAG, "process next task finally");
@@ -243,18 +200,18 @@ public class StitchingThread extends Thread implements PiPano.PiPanoListener {
     }
 
     @Override
-    public void onPiPanoChangeCameraResolution(ChangeResolutionListener listener) {
+    public void onPiPanoChangeCameraResolution(@NonNull ChangeResolutionListener listener) {
     }
 
     @Override
     public void onPiPanoEncoderSurfaceUpdate(long timestamp, boolean isFrameSync) {
         if (mPiPano != null) {
-            mPiPano.drawLensCorrectionFrame(0x1111, true, timestamp, mCurrentTask != null && mCurrentTask.mUseFlow);
+            mPiPano.drawLensCorrectionFrame(0x1111, true, timestamp, mCurrentTask != null && mCurrentTask.params.useFlow);
         }
     }
 
     @Override
-    public void onPiPanoCaptureFrame(int hdrIndex, TakePhotoListener listener) {
+    public void onPiPanoCaptureFrame(int hdrIndex, @NonNull TakePhotoListener listener) {
     }
 
     @Override

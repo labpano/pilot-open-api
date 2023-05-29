@@ -4,6 +4,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.util.Log;
 import android.view.Surface;
 
@@ -38,9 +39,9 @@ public class VideoThumbGenerator {
     /**
      * Generate thumbnail video
      *
-     * @param srcMp4Filepath source mp4 file path
-     * @param dstMp4Filepath destination mp4 file path
-     * @return 0：success
+     * @param srcMp4Filepath 源mp4路径
+     * @param dstMp4Filepath 生成的mp4路径
+     * @return 0：成功
      */
     public int generate(String srcMp4Filepath, String dstMp4Filepath) {
         if (!new File(srcMp4Filepath).isFile()) {
@@ -89,7 +90,7 @@ public class VideoThumbGenerator {
         File dstFile = new File(dstMp4Filepath);
         if (dstFile.exists()) {
             if (dstFile.length() > 0 && ret == 0) {
-                PiPano.spatialMediaFromOldMp4(srcMp4Filepath, dstMp4Filepath, mIsPano);
+                PiPano.spatialMediaFromOldMp4(srcMp4Filepath, dstMp4Filepath, false);
             } else {
                 dstFile.delete();
                 ret = -2;
@@ -185,7 +186,7 @@ public class VideoThumbGenerator {
             if (inputIndex >= 0) {
                 ByteBuffer inputBuffer = srcMediaCodec.getInputBuffer(inputIndex);
                 int sampleSize = 0;
-                Log.d(TAG, "extract,nextSeekTimeUs:" + nextSeekTimeUs);
+                //Log.d(TAG, "extract,nextSeekTimeUs:" + nextSeekTimeUs);
                 if (nextSeekTimeUs == 0) {
                     sampleSize = srcMediaExtractor.readSampleData(inputBuffer, 0);
                     //srcMediaExtractor.advance();
@@ -196,11 +197,11 @@ public class VideoThumbGenerator {
                 }
                 if (sampleSize > 0) {
                     srcMediaCodec.queueInputBuffer(inputIndex, 0, sampleSize, srcMediaExtractor.getSampleTime(), srcMediaExtractor.getSampleFlags());
-                    Log.d(TAG, "extract,inputIndex:" + inputIndex + ",getSampleTime:" + srcMediaExtractor.getSampleTime());
+                    //Log.d(TAG, "extract,inputIndex:" + inputIndex + ",getSampleTime:" + srcMediaExtractor.getSampleTime());
                     ret = true;
                 } else {
                     srcMediaCodec.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                    Log.d(TAG, "extract,inputIndex:" + inputIndex + " end");
+                    //Log.d(TAG, "extract,inputIndex:" + inputIndex + " end");
                     mSrcEndFlag = 1;
                 }
             } else if (inputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
@@ -212,9 +213,9 @@ public class VideoThumbGenerator {
         if (outputIndex > 0) {
             if ((mOutputBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                 mSrcEndFlag = -1;
-                Log.d(TAG, "extract,outputIndex:" + outputIndex + " end");
+                //Log.d(TAG, "extract,outputIndex:" + outputIndex + " end");
             } else {
-                Log.d(TAG, "extract,outputIndex:" + outputIndex + ",presentationTimeUs:" + mOutputBufferInfo.presentationTimeUs);
+                //Log.d(TAG, "extract,outputIndex:" + outputIndex + ",presentationTimeUs:" + mOutputBufferInfo.presentationTimeUs);
             }
             srcMediaCodec.releaseOutputBuffer(outputIndex, true);
         } else if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
@@ -233,11 +234,11 @@ public class VideoThumbGenerator {
         }
         if (outputIndex > 0) {
             if ((mOutputBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                Log.d(TAG, "muxer,outputIndex:" + outputIndex + " end");
+                //Log.d(TAG, "muxer,outputIndex:" + outputIndex + " end");
             } else {
                 ByteBuffer buffer = dstMediaCodec.getOutputBuffer(outputIndex);
                 dstMediaMuxer.writeSampleData(mDstTrackIndex, buffer, mOutputBufferInfo);
-                Log.d(TAG, "muxer,outputIndex:" + outputIndex + ",presentationTimeUs:" + mOutputBufferInfo.presentationTimeUs);
+                //Log.d(TAG, "muxer,outputIndex:" + outputIndex + ",presentationTimeUs:" + mOutputBufferInfo.presentationTimeUs);
             }
             dstMediaCodec.releaseOutputBuffer(outputIndex, false);
         } else if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {

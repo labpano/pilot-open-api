@@ -15,11 +15,16 @@ import java.util.Properties;
 /**
  * Edit Parameter Save<br/>
  */
-@Deprecated
 public class StitchingConfig {
 
+    /**
+     * 视频编辑配置文件
+     */
     public static final String STITCH_CONFIG_FILE_NAME = "stitchingConfig";
 
+    /**
+     * 获取后编辑视频配置文件
+     */
     public static File getStitchingConfigFile(File dir) {
         return new File(dir, STITCH_CONFIG_FILE_NAME);
     }
@@ -35,27 +40,27 @@ public class StitchingConfig {
 
     public @interface Keys {
         /**
-         * Highlights
+         * 高光
          */
         String KEY_HIGHLIGHTS = "HIGHLIGHTS";
         /**
-         * Shadow
+         * 阴影
          */
         String KEY_SHADOW = "SHADOW";
         /**
-         * Bright
+         * 亮度
          */
         String KEY_BRIGHT = "BRIGHT";
         /**
-         * Gamma
+         * 伽马
          */
         String KEY_GAMMA = "GAMMA";
         /**
-         * Saturation
+         * 饱和度
          */
         String KEY_SATURATION = "SATURATION";
         /**
-         * Temperature
+         * 色温
          */
         String KEY_TEMPERATURE = "TEMPERATURE";
     }
@@ -87,60 +92,42 @@ public class StitchingConfig {
     }
 
     /**
-     * save highlights
-     *
-     * @param propFile   propFile
-     * @param highlights highlights
+     * 高光
      */
     public static void setHighlightsValue(File propFile, final int highlights) {
         set(propFile, Keys.KEY_HIGHLIGHTS, String.valueOf(highlights));
     }
 
     /**
-     * save shadow
-     *
-     * @param propFile propFile
-     * @param shadow   shadow
+     * 阴影
      */
     public static void setShadowValue(File propFile, final int shadow) {
         set(propFile, Keys.KEY_SHADOW, String.valueOf(shadow));
     }
 
     /**
-     * save bright
-     *
-     * @param propFile propFile
-     * @param bright   bright
+     * 亮度
      */
-    public static void setBrightValue(File propFile, final int bright) {
+    public static void setBirghtValue(File propFile, final int bright) {
         set(propFile, Keys.KEY_BRIGHT, String.valueOf(bright));
     }
 
     /**
-     * save gamma
-     *
-     * @param propFile propFile
-     * @param gamma    gamma
+     * 伽马
      */
     public static void setGammaValue(File propFile, final int gamma) {
         set(propFile, Keys.KEY_GAMMA, String.valueOf(gamma));
     }
 
     /**
-     * save saturation
-     *
-     * @param propFile   propFile
-     * @param saturation saturation
+     * 饱和度
      */
     public static void setSaturationValue(File propFile, final int saturation) {
         set(propFile, Keys.KEY_SATURATION, String.valueOf(saturation));
     }
 
     /**
-     * save temperature
-     *
-     * @param propFile    propFile
-     * @param temperature temperature
+     * 色温
      */
     public static void setTempeValue(File propFile, final int temperature) {
         set(propFile, Keys.KEY_TEMPERATURE, String.valueOf(temperature));
@@ -170,12 +157,20 @@ public class StitchingConfig {
         return range(percentage, 2000.0f, 8000.0f);
     }
 
+    /**
+     * 范围转换
+     *
+     * @param percentage 0 - 200
+     * @param start      起始大小
+     * @param end        结束大小
+     * @return 返回范围内小数值
+     */
     protected static float range(final int percentage, final float start, final float end) {
         return (end - start) * percentage / 200.0f + start;
     }
 
     /**
-     * get all data.
+     * 获取全部属性
      */
     private static HashMap<String, String> get(File file, String... key) {
         Properties props = read(file);
@@ -186,12 +181,18 @@ public class StitchingConfig {
         return map;
     }
 
+    /**
+     * 对外提供的保存key value方法
+     */
     private static void set(File file, String key, String value) {
         Properties props = read(file);
         props.setProperty(key, value);
         storeProps(file, props);
     }
 
+    /**
+     * 设置属性
+     */
     private static void storeProps(File file, Properties p) {
         FileOutputStream fos = null;
         try {
@@ -208,6 +209,9 @@ public class StitchingConfig {
         }
     }
 
+    /**
+     * 加载属性文件
+     */
     private static Properties read(File file) {
         Properties props = new Properties();
         if (file.exists()) {
@@ -232,6 +236,11 @@ public class StitchingConfig {
         }
     }
 
+    /**
+     * 关闭IO
+     *
+     * @param closeables closeables
+     */
     private static void closeIO(final Closeable... closeables) {
         if (closeables == null) return;
         for (Closeable closeable : closeables) {

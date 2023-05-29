@@ -17,7 +17,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class DefaultChangeResolutionListener extends ChangeResolutionListener {
+public abstract class DefaultChangeResolutionListener extends ChangeResolutionListener {
     protected final String TAG = DefaultChangeResolutionListener.class.getSimpleName();
     // （请求的）视角
     protected final int fieldOfView;
@@ -51,6 +51,8 @@ public class DefaultChangeResolutionListener extends ChangeResolutionListener {
         this.fieldOfView = fieldOfView;
         this.aspectRatio = aspectRatio;
         this.isPanorama = "2:1".equals(aspectRatio);
+        PilotSDK.setLockDefaultPreviewFps(isLockDefaultPreviewFps());
+        PilotSDK.setPreviewImageReaderFormat(null);
     }
 
     protected int getReCaliIntervalFrame(int fps) {
@@ -58,9 +60,9 @@ public class DefaultChangeResolutionListener extends ChangeResolutionListener {
     }
 
     /**
-     * Resolution pre detection
+     * 分辨率前置检测
      *
-     * @param same true:no change.
+     * @param same true:分辨率无变化
      */
     public void onCheckResolution(boolean same) {
         if (same) {
@@ -121,7 +123,7 @@ public class DefaultChangeResolutionListener extends ChangeResolutionListener {
     }
 
     /**
-     * Processing panoramic surface scale.
+     * 处理全景surface显示比例
      */
     protected boolean changeToPanorama(View surfaceView) {
         ViewGroup.LayoutParams params = surfaceView.getLayoutParams();
@@ -136,7 +138,7 @@ public class DefaultChangeResolutionListener extends ChangeResolutionListener {
     }
 
     /**
-     * Processing non panoramic surface scale。
+     * 处理非全景surface比例
      */
     protected boolean changeToOtherRatio(View surfaceView, String aspectRatio) {
         View parentView = (View) surfaceView.getParent();
@@ -155,6 +157,14 @@ public class DefaultChangeResolutionListener extends ChangeResolutionListener {
         params.height = height;
         surfaceView.setLayoutParams(params);
         return needChange;
+    }
+
+    protected boolean isLockDefaultPreviewFps() {
+        return true;
+    }
+
+    protected int[] getPreviewImageReaderFormat() {
+        return null;
     }
 
     private void safeRun(Runnable run) {

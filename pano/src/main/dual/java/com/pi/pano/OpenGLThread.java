@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.os.Message;
 import android.os.SystemClock;
+import android.text.TextUtils;
 import android.view.Surface;
 
 import java.io.BufferedReader;
@@ -14,18 +15,78 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
 
-/**
- * Pano thread.
- */
 public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvailableListener {
+    private static final String TAG = "JPiPano";
 
-    OpenGLThread(PiPanoListener piPanoListener, Context context) {
-        super(piPanoListener, context);
+    /**
+     * 每帧间隔时长
+     */
+    private long mPreviewFpsDuration = 1000 / mPreviewFps;
+
+    @Override
+    public void setPreviewFps(int fps) {
+        super.setPreviewFps(fps);
+        if (mPreviewFps > 0) {
+            mPreviewFpsDuration = 1000 / mPreviewFps;
+        } else {
+            mPreviewFpsDuration = 0;
+        }
+    }
+
+    private long mLastLensCheckTimestamp = 0;
+    private long mLastLensDrawTimestamp = 0;
+    private long mLastPreViewCheckTimestamp = 0;
+    private long mLastPreviewDrawTimestamp = -1;
+
+    OpenGLThread(PiPanoListener piPanoListener, Context context, boolean isRenderFromCamera) {
+        super(piPanoListener, context, isRenderFromCamera);
     }
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        Message.obtain(mHandler, MSG_PIPANO_FRAME_AVAILABLE, surfaceTexture).sendToTarget();
+        try {
+            surfaceTexture.updateTexImage();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        for (int i = 0; i < mCameraFrameCount.length; ++i) {
+            if (surfaceTexture == mSurfaceTexture[i]) {
+                mCameraFrameCount[i]++;
+            }
+        }
+
+        long timestamp = surfaceTexture.getTimestamp();
+
+        if (sDebug) {
+            makeDebugTexture(false,
+                    makeMediaDebugTexture("timestamp: " + timestamp / 1000000 + "ms\n", Color.YELLOW),
+                    0, 0.95f, 0.12f, 0.1f);
+        }
+
+        if (mPiPanoListener.getClass() == CameraSurfaceView.class) {
+            long deltaTimeMs = SystemClock.elapsedRealtime() - SystemClock.uptimeMillis();
+            timestamp -= deltaTimeMs * 1_000_000;
+        }
+
+        if (!isCaptureCompleted) {
+            return;
+        }
+
+        if (mSkipFrameWithOpenCamera > 0) {
+            mSkipFrameWithOpenCamera--;
+            return;
+        }
+        if (mSkipFrameWithStartPreview > 0) {
+            mSkipFrameWithStartPreview--;
+            return;
+        }
+
+        if (mPanoEnabled) {
+            mPiPanoListener.onPiPanoEncoderSurfaceUpdate(timestamp, true);
+            mLastLensDrawTimestamp = timestamp;
+        }
+        mEncodeFrameCount++;
     }
 
     @SuppressLint("Recycle")
@@ -36,7 +97,7 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                 createNativeObj(true, sDebug, mCacheDir);
                 for (int i = 0; i < mSurfaceTexture.length; ++i) {
                     mSurfaceTexture[i] = new SurfaceTexture(getTextureId(i));
-                    mSurfaceTexture[i].setOnFrameAvailableListener(this, mFrameAvailableTask[i].mHandler);
+                    mSurfaceTexture[i].setOnFrameAvailableListener(this);
                 }
                 mPiPanoListener.onPiPanoInit();
                 mHasInit = true;
@@ -44,12 +105,17 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                 mHandler.sendEmptyMessageDelayed(MSG_PIPANO_UPDATE_PRE_SECOND, 1000);
                 break;
             case MSG_PIPANO_UPDATE:
-                if (mSetPreviewFps > 0) {
-                    mHandler.sendEmptyMessageDelayed(MSG_PIPANO_UPDATE, 1000 / mSetPreviewFps);
-                    if (mPanoEnabled) {
-                        drawPreviewFrame(0);
-                        mPreviewFrameCount++;
+                if (mPanoEnabled && mPreviewFpsDuration > 0) {
+                    mHandler.sendEmptyMessageDelayed(MSG_PIPANO_UPDATE, mPreviewFpsDuration);
+                    final boolean hasChange = mLastPreviewDrawTimestamp != mLastLensDrawTimestamp;
+                    if (hasChange) {
+                        drawPreviewFrame(0, true);
+                        mLastPreviewDrawTimestamp = mLastLensDrawTimestamp;
+                    } else {
+                        drawPreviewFrame(0, !mIsRenderFromCamera);
                     }
+                    mPreviewFrameCount++;
+                    drawVioFrame();
                 } else {
                     mHandler.sendEmptyMessageDelayed(MSG_PIPANO_UPDATE, 100);
                 }
@@ -92,23 +158,22 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                         st.release();
                     }
                 }
-                for (FrameAvailableTask task : mFrameAvailableTask) {
-                    task.getLooper().quit();
-                }
                 getLooper().quit();
                 break;
             case MSG_PIPANO_ENABLED:
                 mPanoEnabled = msg.arg1 > 0;
                 if (!mPanoEnabled) {
-                    drawPreviewFrame(1);
+                    drawPreviewFrame(1, true);
                 }
                 break;
             case MSG_PIPANO_DETECTION:
                 mDetectionEnabled = msg.arg1 > 0;
                 if (mDetectionEnabled) {
                     nativeDetectionStart((OnAIDetectionListener) msg.obj);
+                    Input.keepRotateDegreeOnReset(true);
                 } else {
                     nativeDetectionStop();
+                    Input.keepRotateDegreeOnReset(false);
                 }
                 break;
             case MSG_PIPANO_LENS_PROTECTED:
@@ -171,11 +236,12 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                     case 5:
                         setEncodeScreenLiveSurface((Surface) msg.obj);
                         break;
+                    case 6:
+                        setEncodeVioSurface((Surface) msg.obj);
+                        break;
                 }
                 break;
             case MSG_PIPANO_TAKE_PHOTO:
-                mTakePhotoMessage = new Message();
-                mTakePhotoMessage.copyFrom(msg);
                 break;
             case MSG_PIPANO_SAVE_PHOTO:
                 SavePhotoListener listener = (SavePhotoListener) msg.obj;
@@ -191,8 +257,24 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                 }
                 break;
             case MSG_PIPANO_CHANGE_CAMERA_RESOLUTION:
-                drawPreviewFrame(1);
-                mPiPanoListener.onPiPanoChangeCameraResolution((ChangeResolutionListener) msg.obj);
+                ChangeResolutionListener resolutionListener = (ChangeResolutionListener) msg.obj;
+                CameraEnvParams cameraEnvParams = PilotSDK.getCurCameraEnvParams();
+                boolean drawBlurFrame = cameraEnvParams == null || resolutionListener.forceChange;
+                if (!drawBlurFrame) {
+                    boolean cameraChanged = !TextUtils.equals(resolutionListener.mCameraId,
+                            cameraEnvParams.getCameraId());
+                    boolean sizeChanged = resolutionListener.mWidth != cameraEnvParams.getWidth() ||
+                            resolutionListener.mHeight != cameraEnvParams.getHeight();
+                    boolean fpsChanged = false;
+                    if (!PilotSDK.isLockDefaultPreviewFps() && resolutionListener.mWidth != resolutionListener.mHeight) {
+                        fpsChanged = cameraEnvParams.getFps() != resolutionListener.mFps;
+                    }
+                    drawBlurFrame = cameraChanged || sizeChanged || fpsChanged;
+                }
+                if (drawBlurFrame) {
+                    drawPreviewFrame(1, true);
+                }
+                mPiPanoListener.onPiPanoChangeCameraResolution(resolutionListener);
                 break;
             case MSG_PIPANO_SET_STABILIZATION_FILENAME:
                 nativeStabSetFilenameForSave((String) msg.obj);
@@ -209,50 +291,9 @@ public class OpenGLThread extends PiPano implements SurfaceTexture.OnFrameAvaila
                 nativeSetParamCalculateEnable(msg.arg1, msg.arg2 == 1);
                 break;
             case MSG_PIPANO_FRAME_AVAILABLE:
-                SurfaceTexture surfaceTexture = (SurfaceTexture) msg.obj;
-                try {
-                    surfaceTexture.updateTexImage();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-                for (int i = 0; i < mCameraFrameCount.length; ++i) {
-                    if (surfaceTexture == mSurfaceTexture[i]) {
-                        mCameraFrameCount[i]++;
-                    }
-                }
-
-                long timestamp = surfaceTexture.getTimestamp();
-
-                if (mTakePhotoMessage != null) {
-                    TakePhotoListener piSDKTakePhotoListener = (TakePhotoListener) mTakePhotoMessage.obj;
-                    piSDKTakePhotoListener.mTimestamp = timestamp;
-                    if (piSDKTakePhotoListener.mSkipFrame > 0) {
-                        piSDKTakePhotoListener.mSkipFrame--;
-                    } else {
-                        mPiPanoListener.onPiPanoCaptureFrame(mTakePhotoMessage.arg1, piSDKTakePhotoListener);
-                        mTakePhotoMessage = null;
-                    }
-                }
-
-                if (sDebug) {
-                    makeDebugTexture(false,
-                            makeMediaDebugTexture("timestamp: " + timestamp / 1000000 + "ms\n", Color.YELLOW),
-                            0, 0.95f, 0.12f, 0.1f);
-                }
-
-                //实时拼接时,双目要将boottime时间转为monotonic时间
-                if (mPiPanoListener.getClass() == CameraSurfaceView.class) {
-                    long deltaTimeMs = SystemClock.elapsedRealtime() - SystemClock.uptimeMillis();
-                    timestamp -= deltaTimeMs * 1_000_000;
-                }
-                if (!isCaptureCompleted) {
-                    break;
-                }
-                if (mPanoEnabled) {
-                    mPiPanoListener.onPiPanoEncoderSurfaceUpdate(timestamp, true);
-                }
-                mEncodeFrameCount++;
+                break;
+            case MSG_PIPANO_RELOAD_WATERMARK:
+                nativeReloadWatermark((boolean) msg.obj);
                 break;
         }
         return false;

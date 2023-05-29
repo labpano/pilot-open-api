@@ -1,9 +1,5 @@
 package com.pi.pano;
 
-import android.media.MediaExtractor;
-import android.media.MediaFormat;
-import android.util.Log;
-
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.Closeable;
@@ -18,19 +14,9 @@ import java.nio.charset.StandardCharsets;
 public class Utils {
     private static final String TAG = Utils.class.getSimpleName();
 
-    public static String getPhotoStitchFileSimpleName(File file) {
-        String fileName = file.getName();
-        int index = fileName.lastIndexOf("_s");
-        if (index >= 0) {
-            fileName = fileName.substring(0, index);
-        }
-        index = fileName.lastIndexOf("_hdr");
-        if (index >= 0) {
-            fileName = fileName.substring(0, index);
-        }
-        return fileName;
-    }
-
+    /**
+     * 获取未拼接视频文件的基本文件名
+     */
     static String getVideoUnstitchFileSimpleName(File file) {
         String fileName = file.getName();
         int index = fileName.lastIndexOf("_u");
@@ -100,26 +86,4 @@ public class Utils {
         }
     }
 
-    static int getVideoPfs(String filePath) {
-        MediaExtractor extractor = new MediaExtractor();
-        int fps = 0;
-        try {
-            extractor.setDataSource(filePath);
-            for (int i = 0; i < extractor.getTrackCount(); i++) {
-                MediaFormat trackFormat = extractor.getTrackFormat(i);
-                String mime = trackFormat.getString(MediaFormat.KEY_MIME);
-                if (mime.startsWith("video/avc")) {
-                    fps = trackFormat.getInteger(MediaFormat.KEY_FRAME_RATE);
-                } else if (mime.startsWith("video/hevc")) {
-                    fps = trackFormat.getInteger(MediaFormat.KEY_FRAME_RATE);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            Log.e(TAG, "getVideoPfs error :" + e.getMessage() + ", : " + filePath);
-        } finally {
-            extractor.release();
-        }
-        return fps;
-    }
 }

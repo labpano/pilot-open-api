@@ -11,7 +11,6 @@ import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaPlayer;
-import android.media.PlaybackParams;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
@@ -20,6 +19,7 @@ import android.util.Log;
 import android.view.Surface;
 
 import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import java.io.File;
@@ -72,7 +72,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
     }
 
     @Override
-    public void onPiPanoChangeCameraResolution(ChangeResolutionListener listener) {
+    public void onPiPanoChangeCameraResolution(@NonNull ChangeResolutionListener listener) {
     }
 
     @Override
@@ -85,7 +85,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
     }
 
     @Override
-    public void onPiPanoCaptureFrame(int hdrIndex, TakePhotoListener listener) {
+    public void onPiPanoCaptureFrame(int hdrIndex, @NonNull TakePhotoListener listener) {
     }
 
     @Override
@@ -215,6 +215,9 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 }
                 return;
             }
+            if (isStitched) {
+                mPiPano.setParamReCaliEnable(0, true);
+            }
             if (PilotSDK.CAMERA_COUNT == 1) {
                 if (isStitched) {
                     setLensCorrectionMode(0x2);
@@ -282,6 +285,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 mHandler.removeCallbacks(this);
                 mHandler.getLooper().quit();
                 releaseGlSurface();
+                resetParamReCaliEnable();
                 try {
                     mThread.join();
                 } catch (InterruptedException e) {
@@ -400,7 +404,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
         if (isStitched) {
             mPlay = new StitchVideoPlayControl(file, listener);
         } else {
-            mPlay = new UnStitchVideoPlayControl3(file, listener);
+            mPlay = new UnStitchVideoPlayControl(file, listener);
         }
         return (IVideoPlayControl) mPlay;
     }
@@ -451,6 +455,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 }
                 return;
             }
+            mPiPano.setParamReCaliEnable(0, true); // 拼接视频不需要拼接距离
             setLensCorrectionMode(0x2);
             mMyMediaPlayer = new MediaPlayer();
             mMyMediaPlayer.setSurface(obtainGlSurface());
@@ -538,6 +543,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 mHandler.removeCallbacksAndMessages(null);
                 changeState(VideoPlayState.release);
                 mHandler.post(this::checkState);
+                resetParamReCaliEnable();
                 try {
                     mThread.join();
                 } catch (InterruptedException e) {
@@ -608,259 +614,10 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
         }
     }
 
-    protected class UnStitchVideoPlayControl implements IVideoPlayControl {
-        private final String TAG = MediaPlayerSurfaceView.TAG + "$UnStitchVideo";
-        private final String filepath;
-        private VideoPlayListener listener;
-        private final Handler mHandler;
-        private final HandlerThread mThread;
-
-        @VideoPlayState
-        private int state = VideoPlayState.release;
-
-        protected UnStitchVideoPlayControl(File file, VideoPlayListener listener) {
-            this.filepath = file.getAbsolutePath();
-            this.listener = listener;
-            mThread = new HandlerThread("play:" + file.getName());
-            mThread.start();
-            mHandler = new Handler(mThread.getLooper());
-            mHandler.post(this::initNative);
-        }
-
-        @Override
-        @VideoPlayState
-        public int getState() {
-            return state;
-        }
-
-        @Override
-        public void play() {
-            if (state != VideoPlayState.started) {
-                Log.d(TAG, "play");
-                changeState(VideoPlayState.started);
-                mHandler.post(this::checkState);
-            }
-        }
-
-        @Override
-        public void pause() {
-            if (state != VideoPlayState.paused) {
-                Log.d(TAG, "pause");
-                changeState(VideoPlayState.paused);
-            }
-        }
-
-        @Override
-        public void seek(float progress) {
-            seek_progress = progress;
-            if (state != VideoPlayState.started) {
-                Log.d(TAG, "seek," + progress);
-                mHandler.post(this::checkState);
-            }
-        }
-
-        @Override
-        public void release() {
-            if (state != VideoPlayState.release) {
-                Log.d(TAG, "release...");
-                mHandler.removeCallbacksAndMessages(null);
-                changeState(VideoPlayState.release);
-                mHandler.post(this::checkState);
-                listener = null;
-                try {
-                    mThread.join();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                Log.d(TAG, "release,end");
-            }
-        }
-
-        @Override
-        public float getDuration() {
-            return mDuration;
-        }
-
-        @Override
-        public float getCurTime() {
-            if (null != mStitchingNative) {
-                return mStitchingNative.getExtractorSampleTime(0) / 1000.0f;
-            }
-            return 0;
-        }
-
-        private StitchingNative mStitchingNative;
-        private MediaPlayer mMyMediaPlayer;
-        private float seek_progress = -1;
-        private float mDuration;
-        private long mLastDeltaAudioVideo;
-
-        private void checkState() {
-            boolean loop = true;
-            while (loop) {
-                switch (state) {
-                    case VideoPlayState.started:
-                        if (seek_progress >= 0 && mDuration >= 0) {
-                            seekTo(seek_progress);
-                            seek_progress = -1;
-                        }
-                        if (mMyMediaPlayer != null && !mMyMediaPlayer.isPlaying()) {
-                            mMyMediaPlayer.start();
-                        }
-                        if (!nextOneFrame()) {
-                            changeState(VideoPlayState.completed);
-                        }
-                        break;
-                    case VideoPlayState.release:
-                        releaseNative();
-                        mHandler.getLooper().quitSafely();
-                        loop = false;
-                        break;
-                    default:
-                        loop = false;
-                        break;
-                }
-            }
-        }
-
-        private void initNative() {
-            Log.d(TAG, "initNative...");
-            waitPanoInit(2000);
-            if (null == mPiPano || !mPiPano.mHasInit) {
-                Log.e(TAG, "initNative,PiPano not init.");
-                onControlInitListener(1);
-                return;
-            }
-            setLensCorrectionMode(0x1111);
-            if (mStitchingNative != null) {
-                mStitchingNative.deleteFrameExtractor();
-                mStitchingNative = null;
-            }
-            final String filepath0 = new File(filepath, "0.mp4").getAbsolutePath();
-            mDuration = StitchingUtil.getDuring(filepath0) / 1000.0f;
-            mLastDeltaAudioVideo = 0;
-            mPiPano.useGyroscope(
-                    new File(filepath, "stabilization").exists(),
-                    filepath);
-            mPiPano.setPreviewSize(PREVIEW_SIZE_MAX_WIDTH, PREVIEW_SIZE_MAX_HEIGHT);
-            mStitchingNative = new StitchingNative();
-            mStitchingNative.startStitching(filepath, mPiPano);
-            mMyMediaPlayer = new MediaPlayer();
-            try {
-                mMyMediaPlayer.setDataSource(filepath0);
-                mMyMediaPlayer.prepare();
-                mMyMediaPlayer.seekTo(0);
-            } catch (Exception ex) {
-                Log.e(TAG, "initNative,ex:" + ex);
-                ex.printStackTrace();
-                onControlInitListener(1);
-                return;
-            }
-            boolean hasFrame = mStitchingNative.extractorOneFrame();
-            if (hasFrame) {
-                mStitchingNative.decodeOneFrame(true);
-            }
-            onControlInitListener(0);
-            changeState(VideoPlayState.prepared);
-            if (null != listener) {
-                mHandler.post(() -> listener.onPlayTimeChange(this, 0f, getDuration()));
-            }
-            Log.d(TAG, "initNative,ok");
-        }
-
-        private void onControlInitListener(int ret) {
-            if (null != listener) {
-                listener.onPlayControlInit(this, ret);
-            }
-        }
-
-        private void releaseNative() {
-            Log.d(TAG, "releaseNative...");
-            if (null != mStitchingNative) {
-                mStitchingNative.deleteFrameExtractor();
-                mStitchingNative = null;
-            }
-            if (null != mMyMediaPlayer) {
-                if (mMyMediaPlayer.isPlaying()) {
-                    mMyMediaPlayer.stop();
-                }
-                mMyMediaPlayer.release();
-                mMyMediaPlayer = null;
-            }
-            if (listener != null) {
-                listener.onPlayControlRelease(this);
-            }
-            Log.d(TAG, "releaseNative,ok");
-        }
-
-        private boolean nextOneFrame() {
-            if (mStitchingNative == null) {
-                return false;
-            }
-            if (mMyMediaPlayer.isPlaying()) {
-                long deltaAudioVideo = mMyMediaPlayer.getTimestamp().getAnchorMediaTimeUs() - mStitchingNative.getExtractorSampleTime(0);
-                PlaybackParams params = mMyMediaPlayer.getPlaybackParams();
-                float currentPlaySpeed = params.getSpeed();
-                float needPlaySpeed = 1.0f;
-                if (deltaAudioVideo > 50000) {
-                    //如果音频播放快且有更快趋势,则降低音频播放速度
-                    if (deltaAudioVideo > mLastDeltaAudioVideo) {
-                        needPlaySpeed = currentPlaySpeed - 0.01f;
-                    }
-                } else if (deltaAudioVideo < -50000) {
-                    //如果音频播放慢,且有更慢趋势,则加快音频播放速度
-                    if (deltaAudioVideo < mLastDeltaAudioVideo) {
-                        needPlaySpeed = currentPlaySpeed + 0.01f;
-                    }
-                }
-                mLastDeltaAudioVideo = deltaAudioVideo;
-                if (Math.abs(needPlaySpeed - params.getSpeed()) > 0.001f && needPlaySpeed > 0) {
-                    params.setSpeed(needPlaySpeed);
-                    mMyMediaPlayer.setPlaybackParams(params);
-                }
-            }
-            boolean hasFrame = mStitchingNative.extractorOneFrame();
-            if (hasFrame) {
-                mStitchingNative.decodeOneFrame(true);
-            }
-            notifyStateTimeChange();
-            return hasFrame;
-        }
-
-        private void seekTo(float progress) {
-            Log.d(TAG, "seekTo," + progress);
-            if (null == mStitchingNative) {
-                return;
-            }
-            float duration = progress * mDuration;
-            mStitchingNative.seekToPreviousKeyFrame((long) (duration * 1000));
-            mMyMediaPlayer.seekTo((int) (duration));
-        }
-
-        private void changeState(int state) {
-            if (this.state != state) {
-                this.state = state;
-                notifyStateChange();
-            }
-        }
-
-        private void notifyStateChange() {
-            if (listener != null) {
-                listener.onPlayStateChange(this, state);
-            }
-        }
-
-        private void notifyStateTimeChange() {
-            if (listener != null) {
-                listener.onPlayTimeChange(this, getCurTime(), mDuration);
-            }
-        }
-    }
-
     /**
-     * Unstitched video play.
+     * 未拼接视频播放。
      */
-    protected class UnStitchVideoPlayControl3 implements IVideoPlayControl {
+    protected class UnStitchVideoPlayControl implements IVideoPlayControl {
         private final String TAG = MediaPlayerSurfaceView.TAG + "$UnStitchVideo3";
         private final String filepath;
         private final VideoPlayListener listener;
@@ -874,7 +631,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
 
         private final HandlerThread mThread;
 
-        protected UnStitchVideoPlayControl3(File file, @Nullable VideoPlayListener listener) {
+        protected UnStitchVideoPlayControl(File file, @Nullable VideoPlayListener listener) {
             this.filepath = file.getAbsolutePath();
             this.listener = listener;
             mThread = new HandlerThread("play:" + file.getName());
@@ -905,29 +662,31 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 notifyPlayControlInit(1);
                 return;
             }
-            mPiPano.pausePreviewUpdate();
             final String filepath0 = new File(filepath, "0.mp4").getAbsolutePath();
             mDuration = StitchingUtil.getDuring(filepath0) / 1000.0f;
-            int pfs = Utils.getVideoPfs(filepath0);
-            mPiPano.setParamReCaliEnable(pfs > 0 ? pfs * 2 : 0, true);
-            setLensCorrectionMode(0x1111);
-            mPiPano.useGyroscope(
-                    new File(filepath, "stabilization").exists(),
-                    filepath);
             try {
+                mPiPano.pausePreviewUpdate();
+                setLensCorrectionMode(0x1111);
+                mPiPano.useGyroscope(
+                        new File(filepath, "stabilization").exists(),
+                        filepath);
                 releaseGlSurface();
                 mVideoDecoder = new VideoDecoder(filepath0, obtainGlSurface());
+                int pfs = mVideoDecoder.selectVideoTrackFps;
+                mPiPano.setParamReCaliEnable(pfs > 0 ? pfs * 2 : 0, true); // 未拼接视频测量拼接距离间隔
             } catch (Exception ex) {
-                Log.e(TAG, "initPlayer,ex:" + ex);
-                mPiPano.resumePreviewUpdate();
+                Log.e(TAG, "initPlayer, video ex:" + ex);
                 ex.printStackTrace();
+                if (mPiPano != null) {
+                    mPiPano.resumePreviewUpdate();
+                }
                 notifyPlayControlInit(1);
                 return;
             }
             try {
                 mAudioDecoder = new AudioDecoder(filepath0);
             } catch (Exception ex) {
-                Log.e(TAG, "initPlayer,ex:" + ex);
+                Log.e(TAG, "initPlayer, audio ex:" + ex);
                 ex.printStackTrace();
             }
             notifyPlayControlInit(0);
@@ -942,8 +701,9 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
             if (null != mVideoThread) {
                 try {
                     mVideoThread.join();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                } catch (InterruptedException ex) {
+                    Log.e(TAG, "releasePlayer, video ex:" + ex);
+                    ex.printStackTrace();
                 }
                 mVideoThread = null;
             }
@@ -1024,10 +784,12 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 mState = VideoPlayState.release;
                 releasePlayer();
                 mHandler.getLooper().quitSafely();
+                resetParamReCaliEnable();
                 try {
                     mThread.join();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                } catch (InterruptedException ex) {
+                    Log.d(TAG, "release,ex:" + ex);
+                    ex.printStackTrace();
                 }
                 notifyStateChange();
                 notifyPlayControlRelease();
@@ -1085,6 +847,8 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
 
             private volatile long seekTimeUs = -1;
 
+            int selectVideoTrackFps = 0;
+
             public VideoDecoder(String filepath0, Surface surface) throws IOException {
                 this.filepath0 = filepath0;
                 mSurface = surface;
@@ -1101,6 +865,7 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                         String mime = format.getString(MediaFormat.KEY_MIME);
                         if (mime.startsWith("video/")) {
                             videoFormat = format;
+                            selectVideoTrackFps = format.getInteger(MediaFormat.KEY_FRAME_RATE);
                             mMediaExtractor.selectTrack(trackIndex);
                             break;
                         }
@@ -1263,6 +1028,8 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
             private AudioTrack mAudioTrack = null;
 
             private volatile long seekTimeUs = -1;
+            private int mChannelCount = 2;
+            private byte[] inputBytes, outputBytes;
 
             public AudioDecoder(String filepath0) throws IOException {
                 this.filepath0 = filepath0;
@@ -1287,11 +1054,12 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                         throw new RuntimeException("No audio track found in " + filepath0);
                     }
                     final String mime = audioFormat.getString(MediaFormat.KEY_MIME);
+                    //
+                    int audioChannels = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                    mChannelCount = audioChannels;
                     mMediaCodec = MediaCodec.createDecoderByType(mime);
                     mMediaCodec.configure(audioFormat, null, null, 0);
                     mMediaCodec.start();
-                    //
-                    int audioChannels = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
                     int audioSampleRate = audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
                     final int min_buf_size = AudioTrack.getMinBufferSize(audioSampleRate,
                             (audioChannels == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO),
@@ -1379,6 +1147,12 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                         }
                     }
                     ByteBuffer byteBuffer = mMediaCodec.getOutputBuffer(outIndex);
+                    if (mChannelCount == 4) {
+                        checkByteBuffer(byteBuffer);
+                        byteBuffer.get(inputBytes);
+                        changeToTwoChannelAudio(inputBytes, outputBytes, AudioFormat.ENCODING_PCM_16BIT);
+                        byteBuffer = ByteBuffer.wrap(outputBytes);
+                    }
                     mAudioTrack.write(byteBuffer, byteBuffer.limit(), AudioTrack.WRITE_NON_BLOCKING, mBufferInfo.presentationTimeUs);
                     mMediaCodec.releaseOutputBuffer(outIndex, false);
                     if (first) {
@@ -1387,6 +1161,31 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                     }
                 }
                 return outIndex;
+            }
+
+            /**
+             * 从 pano 4声道数据中 取出 左右声道数据
+             */
+            private void changeToTwoChannelAudio(byte[] inputBytes, byte[] outputBytes, int audioEncoding) {
+                if (audioEncoding != AudioFormat.ENCODING_PCM_16BIT) {
+                    return;
+                }
+                // pano 4声道数据分布 []{ front, left ,right ,back }
+                int channelLeft = 1, channelRight = 2;
+                int j = 0;
+                final int channelCount = 4;
+                // audioEncoding(pcm_16bit) 占字节个数
+                final int oneChannelByte = 2;
+                int step = channelCount * oneChannelByte;
+                // 取出 左右声道数据
+                int length = inputBytes.length;
+                for (int i = 0; i < length; i = i + step) {
+                    outputBytes[j++] = inputBytes[i + channelLeft * oneChannelByte];
+                    outputBytes[j++] = inputBytes[i + channelLeft * oneChannelByte + 1];
+
+                    outputBytes[j++] = inputBytes[i + channelRight * oneChannelByte];
+                    outputBytes[j++] = inputBytes[i + channelRight * oneChannelByte + 1];
+                }
             }
 
             @Override
@@ -1442,6 +1241,23 @@ public class MediaPlayerSurfaceView extends PanoSurfaceView {
                 if (null != mMediaExtractor) {
                     mMediaExtractor.release();
                     mMediaExtractor = null;
+                }
+                inputBytes = null;
+                outputBytes = null;
+            }
+
+            private void checkByteBuffer(ByteBuffer buffer) {
+                if (inputBytes == null) {
+                    inputBytes = new byte[buffer.remaining()];
+                }
+                if (inputBytes.length != buffer.remaining()) {
+                    inputBytes = new byte[buffer.remaining()];
+                }
+                if (outputBytes == null) {
+                    outputBytes = new byte[inputBytes.length / 2];
+                }
+                if (outputBytes.length != inputBytes.length / 2) {
+                    outputBytes = new byte[inputBytes.length / 2];
                 }
             }
         }

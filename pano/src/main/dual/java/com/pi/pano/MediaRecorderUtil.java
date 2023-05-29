@@ -18,6 +18,7 @@ import android.media.AudioRecord;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.media.MediaRecorder;
 import android.os.SystemClock;
 import android.util.Log;
@@ -29,6 +30,7 @@ import com.pi.pano.ext.IAudioRecordExt;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -37,11 +39,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class MediaRecorderUtil {
     private static final String TAG = "MediaRecorderUtil";
+    /**
+     * 4 channels.
+     */
+    private static final int CHANNEL_FOUR = 4;
 
     private static Location mLocation;
     private static final Object mLocationLock = new Object();
 
-    private AudioRecord mAudioRecord;
     private byte[] mAudioBuffer;
     private MediaCodec mVideoEncoder;
     private MediaCodec mAudioEncoder;
@@ -57,17 +62,22 @@ public class MediaRecorderUtil {
     private long mMemomotionRatio = 0;              //延时摄影倍率
     private float mMemomotionTimeMulti = 1.0f; //用于转换真实时间戳和延时摄影时间戳
     private boolean mUseForGoogleMap = false;
+    private MediaRecorderUtilForStreetVideo mMediaRecorderUtilForStreetVideo;
     private String mFilename;
 
     private SensorManager mSensorManager;
     private final ConcurrentLinkedQueue<SimpleSensorEvent> mAccelerometerEventQueue = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<SimpleSensorEvent> mGyroscopeEventQueue = new ConcurrentLinkedQueue<>();
     /**
-     * 音频额外编码处理器。
-     * 如：音频降噪。
+     * Audio Extra Codec Processor.
+     * Such as: audio noise reduction.
      */
-    private IAudioEncoderExt mAudioEncoderExt;
+    private List<IAudioEncoderExt> mAudioEncoderExtList;
     private IAudioRecordExt mAudioRecordExt;
+    /**
+     * Whether panoramic sound (4 channels).
+     */
+    private boolean isSpatialAudio;
 
     private Thread mVideoThread;
     private Thread mAudioThread;
@@ -75,11 +85,11 @@ public class MediaRecorderUtil {
     private SensorEventListener mSensorEventListener;
 
     /**
-     * 设置音频额外编码处理器,
-     * 应在开始录像前设置。
+     * Set the audio extra encoding processor,
+     * It should be set before starting recording.
      */
-    public void setAudioEncoderExt(IAudioEncoderExt audioEncoderExt) {
-        mAudioEncoderExt = audioEncoderExt;
+    public void setAudioEncoderExt(List<IAudioEncoderExt> list) {
+        mAudioEncoderExtList = list;
     }
 
     public void setAudioRecordExt(IAudioRecordExt audioRecordExt) {
@@ -93,10 +103,10 @@ public class MediaRecorderUtil {
     public Surface startRecord(Context context, String filename, String mime, int width, int height,
                                int fps, int bitRate, boolean useForGoogleMap,
                                int memomotionRatio, int channelCount, int previewFps) {
-        Log.i(TAG, "startRecord start==> filename:" + filename + " height:" + height +
-                " width:" + width + " fps:" + fps + " bitRate:" + bitRate +
-                " useForGoogleMap:" + useForGoogleMap + " memomotionRatio:" + memomotionRatio +
-                " mime:" + mime + " channelCount:" + channelCount + " previewFps:" + previewFps);
+        if (useForGoogleMap) {
+            mMediaRecorderUtilForStreetVideo = new MediaRecorderUtilForStreetVideo();
+            return mMediaRecorderUtilForStreetVideo.startRecord(context, filename, mime, width, height, fps, bitRate, useForGoogleMap, memomotionRatio, channelCount, previewFps);
+        }
         if (filename.length() == 0 || width == 0 || height == 0 || bitRate == 0) {
             Log.e(TAG, "startRecord parameter error!");
             return null;
@@ -124,13 +134,12 @@ public class MediaRecorderUtil {
         initVideoFormat(videoFormat, width, height, fps, bitRate, previewFps, mUseForGoogleMap, mMemomotionRatio);
 
         Surface surface;
-        boolean useRecordExt;
         try {
             mMediaMuxer = new MediaMuxer(filename, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             mVideoEncoder = MediaCodec.createEncoderByType(mime);
             mVideoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
             surface = mVideoEncoder.createInputSurface();
-            useRecordExt = initAudioRecord(channelCount, memomotionRatio);
+            initAudioRecord(channelCount, memomotionRatio);
             mVideoEncoder.start();
         } catch (IOException e) {
             e.printStackTrace();
@@ -141,7 +150,7 @@ public class MediaRecorderUtil {
         }
         mRun = true;
         if (mAudioEncoder != null) {
-            if (useRecordExt) {
+            if (isSpatialAudio) {
                 initFourAudioThread();
                 mFourAudioThread.start();
             } else {
@@ -155,6 +164,10 @@ public class MediaRecorderUtil {
     }
 
     public void stopRecord(boolean injectPanoMetadata, boolean isPano, String firmware, String artist) {
+        if (mMediaRecorderUtilForStreetVideo != null) {
+            mMediaRecorderUtilForStreetVideo.stopRecord(injectPanoMetadata, isPano, firmware, artist);
+            return;
+        }
         mRun = false;
         try {
             mVideoThread.join();
@@ -175,7 +188,7 @@ public class MediaRecorderUtil {
             mSensorManager.unregisterListener(mSensorEventListener);
         }
         if (mFilename != null && injectPanoMetadata) {
-            PiPano.spatialMediaImpl(mFilename, isPano, firmware, artist, mMemomotionTimeMulti);
+            PiPano.spatialMediaImpl(mFilename, isPano, isSpatialAudio, firmware, artist, mMemomotionTimeMulti);
         }
     }
 
@@ -186,6 +199,7 @@ public class MediaRecorderUtil {
         synchronized (mLocationLock) {
             mLocation = location;
         }
+        MediaRecorderUtilForStreetVideo.setLocationInfo(location);
     }
 
     static class SimpleSensorEvent {
@@ -404,17 +418,14 @@ public class MediaRecorderUtil {
     private void initAudioThread() {
         mAudioThread = new Thread() {
             private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
-            private IAudioEncoderExt audioEncoderExt;
             private byte[] mAudioBufferExt;
             private long presentationTimeUs;
 
             @Override
             public void run() {
-                audioEncoderExt = mAudioEncoderExt;
-                if (null != audioEncoderExt) {
+                if (mAudioEncoderExtList != null) {
                     mAudioBufferExt = new byte[mAudioBuffer.length];
                 }
-
                 presentationTimeUs = 0;
 
                 while (mRun) {
@@ -422,12 +433,19 @@ public class MediaRecorderUtil {
                 }
 
                 try {
-                    if (mAudioRecord != null) {
-                        mAudioRecord.stop();
-                        mAudioRecord.release();
+                    if (mAudioRecordExt != null) {
+                        mAudioRecordExt.stop();
+                        mAudioRecordExt.release();
                     }
                     mAudioEncoder.stop();
                     mAudioEncoder.release();
+                    if (mAudioEncoderExtList != null) {
+                        for (IAudioEncoderExt ext : mAudioEncoderExtList) {
+                            ext.release();
+                        }
+                        mAudioEncoderExtList.clear();
+                        mAudioEncoderExtList = null;
+                    }
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -438,21 +456,31 @@ public class MediaRecorderUtil {
                 ByteBuffer[] inputBuffers = mAudioEncoder.getInputBuffers();
                 int inputIndex = mAudioEncoder.dequeueInputBuffer(0);
                 if (inputIndex >= 0) {
-                    int readCount = mAudioRecord.read(mAudioBuffer, 0, mAudioBuffer.length); // read audio raw data
+                    int readCount = mAudioRecordExt.read(mAudioBuffer, 0, mAudioBuffer.length); // read audio raw data
                     if (readCount < 0) {
                         return;
                     }
                     final long pts = System.nanoTime() / 1000;
                     ByteBuffer inputBuffer = inputBuffers[inputIndex];
                     inputBuffer.clear();
-                    if (audioEncoderExt != null) {
-                        int count = audioEncoderExt.decodeProcess(mAudioBuffer, readCount, mAudioBufferExt);
-                        if (count != -1) {
-                            readCount = count;
-                            inputBuffer.put(mAudioBufferExt, 0, count);
-                        } else {
-                            inputBuffer.put(mAudioBuffer);
+                    if (mAudioEncoderExtList != null && mAudioEncoderExtList.size() > 0) {
+                        byte[] input = mAudioBuffer;
+                        byte[] outPut = mAudioBufferExt;
+                        byte[] temp;
+                        int size = mAudioEncoderExtList.size();
+                        for (int i = 0; i < size; i++) {
+                            IAudioEncoderExt ext = mAudioEncoderExtList.get(i);
+                            int count = ext.encodeProcess(input, readCount, outPut);
+                            if (count != -1) {
+                                readCount = count;
+                                if (i != size - 1) {
+                                    temp = outPut;
+                                    outPut = input;
+                                    input = temp;
+                                }
+                            }
                         }
+                        inputBuffer.put(outPut, 0, readCount);
                     } else {
                         inputBuffer.put(mAudioBuffer);
                     }
@@ -495,14 +523,12 @@ public class MediaRecorderUtil {
     private void initFourAudioThread() {
         mFourAudioThread = new Thread() {
             private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
-            private IAudioEncoderExt audioEncoderExt;
             private byte[] mAudioBufferExt;
             private long presentationTimeUs;
 
             @Override
             public void run() {
-                audioEncoderExt = mAudioEncoderExt;
-                if (null != audioEncoderExt) {
+                if (null != mAudioEncoderExtList) {
                     mAudioBufferExt = new byte[mAudioBuffer.length];
                 }
                 presentationTimeUs = 0;
@@ -519,9 +545,12 @@ public class MediaRecorderUtil {
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-                if (null != audioEncoderExt) {
-                    audioEncoderExt.release();
-                    audioEncoderExt = null;
+                if (mAudioEncoderExtList != null) {
+                    for (IAudioEncoderExt ext : mAudioEncoderExtList) {
+                        ext.release();
+                    }
+                    mAudioEncoderExtList.clear();
+                    mAudioEncoderExtList = null;
                 }
                 Log.i(TAG, "Encoder audio thread finish");
             }
@@ -540,14 +569,24 @@ public class MediaRecorderUtil {
                     final long pts = System.nanoTime() / 1000;
                     ByteBuffer inputBuffer = inputBuffers[inputIndex];
                     inputBuffer.clear();
-                    if (audioEncoderExt != null) {
-                        int count = audioEncoderExt.decodeProcess(mAudioBuffer, mAudioBuffer.length, mAudioBufferExt);
-                        if (count != -1) {
-                            readCount = count;
-                            inputBuffer.put(mAudioBufferExt, 0, count);
-                        } else {
-                            inputBuffer.put(mAudioBuffer);
+                    if (mAudioEncoderExtList != null && mAudioEncoderExtList.size() > 0) {
+                        byte[] input = mAudioBuffer;
+                        byte[] outPut = mAudioBufferExt;
+                        byte[] temp;
+                        int size = mAudioEncoderExtList.size();
+                        for (int i = 0; i < size; i++) {
+                            IAudioEncoderExt ext = mAudioEncoderExtList.get(i);
+                            int count = ext.encodeProcess(input, readCount, outPut);
+                            if (count != -1) {
+                                readCount = count;
+                                if (i != size - 1) {
+                                    temp = outPut;
+                                    outPut = input;
+                                    input = temp;
+                                }
+                            }
                         }
+                        inputBuffer.put(outPut, 0, readCount);
                     } else {
                         inputBuffer.put(mAudioBuffer);
                     }
@@ -673,53 +712,51 @@ public class MediaRecorderUtil {
         }
     }
 
-    /**
-     * 初始化 record
-     *
-     * @return true: useRecordExt ， false: use record
-     */
-    private boolean initAudioRecord(int channelCount, int memomotionRatio) throws IOException {
+    private void initAudioRecord(int channelCount, int memomotionRatio) throws IOException {
         if (!mUseForGoogleMap && memomotionRatio == 0 && channelCount > 0) {
+            if (mAudioRecordExt == null) {
+                mAudioRecordExt = new DefaultAudioRecordExt();
+            }
             MediaFormat audioFormat;
-            int sampleRateInHz = 44100;
+            int sampleRateInHz;
+            int bitRate;
+            if (channelCount == CHANNEL_FOUR) {
+                sampleRateInHz = 48000;
+                bitRate = 256000;
+            } else {
+                sampleRateInHz = 44100;
+                bitRate = 128000;
+            }
             int channelConfig = (channelCount == 1 ? AudioFormat.CHANNEL_IN_MONO
                     : AudioFormat.CHANNEL_IN_STEREO);
             int audioEncoding = AudioFormat.ENCODING_PCM_16BIT;
+
             int minBufferSize = AudioRecord.getMinBufferSize(sampleRateInHz, channelConfig, audioEncoding);
             mAudioBuffer = new byte[4096];
 
-            boolean useRecordExt = false;
-            if (mAudioRecordExt != null && channelCount == 4) {
+            if (channelCount == CHANNEL_FOUR) {
                 channelConfig = AudioFormat.CHANNEL_IN_STEREO | AudioFormat.CHANNEL_IN_FRONT | AudioFormat.CHANNEL_IN_BACK;
-                mAudioRecordExt.configure(MediaRecorder.AudioSource.MIC, sampleRateInHz, channelConfig,
-                        audioEncoding, Math.max(minBufferSize, mAudioBuffer.length));
-                useRecordExt = true;
             }
-            if (!useRecordExt) {
-                mAudioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleRateInHz, channelConfig,
-                        audioEncoding, Math.max(minBufferSize, mAudioBuffer.length));
-            }
+            mAudioRecordExt.configure(MediaRecorder.AudioSource.MIC, sampleRateInHz, channelConfig,
+                    audioEncoding, Math.max(minBufferSize, mAudioBuffer.length));
             audioFormat = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRateInHz, channelCount);
             audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
+            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
             audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
-            if (null != mAudioEncoderExt) {
-                mAudioEncoderExt.configure(sampleRateInHz, channelCount, audioEncoding);
+            if (mAudioEncoderExtList != null) {
+                for (IAudioEncoderExt ext : mAudioEncoderExtList) {
+                    ext.configure(sampleRateInHz, channelCount, audioEncoding);
+                }
             }
-            if (useRecordExt) {
+            if (channelCount == CHANNEL_FOUR) {
                 mAudioEncoder = MediaCodec.createByCodecName("OMX.google.aac.encoder");
+                isSpatialAudio = true;
             } else {
                 mAudioEncoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
             }
             mAudioEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            if (useRecordExt) {
-                mAudioRecordExt.startRecording();
-            } else {
-                mAudioRecord.startRecording();
-            }
+            mAudioRecordExt.startRecording();
             mAudioEncoder.start();
-            return useRecordExt;
         }
-        return false;
     }
 }

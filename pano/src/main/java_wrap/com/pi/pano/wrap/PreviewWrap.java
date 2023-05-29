@@ -1,30 +1,25 @@
 package com.pi.pano.wrap;
 
+import android.util.Log;
 import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.pi.pano.DefaultChangeResolutionListener;
-import com.pi.pano.DefaultLiveChangeResolutionListener;
-import com.pi.pano.DefaultPlaneChangeResolutionListener;
-import com.pi.pano.DefaultScreenLiveChangeResolutionListener;
-import com.pi.pano.DefaultStreetVideoChangeResolutionListener;
-import com.pi.pano.ExposeTimeAdjustHelper;
 import com.pi.pano.IPreviewParamListener;
 import com.pi.pano.OnAIDetectionListener;
 import com.pi.pano.PanoSDKListener;
 import com.pi.pano.PilotSDK;
+import com.pi.pano.ResolutionParams;
+import com.pi.pano.annotation.PiAntiMode;
 import com.pi.pano.annotation.PiExposureCompensation;
 import com.pi.pano.annotation.PiExposureTime;
 import com.pi.pano.annotation.PiIso;
-import com.pi.pano.annotation.PiPhotoResolution;
-import com.pi.pano.annotation.PiPreviewMode;
-import com.pi.pano.annotation.PiPushResolution;
 import com.pi.pano.annotation.PiStitchDistance;
 import com.pi.pano.annotation.PiStitchDistanceMax;
-import com.pi.pano.annotation.PiVideoResolution;
 import com.pi.pano.annotation.PiWhiteBalance;
+import com.pi.pano.wrap.annotation.PiSteadyOrientation;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -35,31 +30,24 @@ import java.util.Map;
 public class PreviewWrap {
     private static final String TAG = PreviewWrap.class.getSimpleName();
 
-    public static final int makePanoWithMultiFisheye_mask = 0x0101;
-
     /**
      * init PanoView
      */
     public static PilotSDK initPanoView(ViewGroup parent, PanoSDKListener listener) {
-        return new PilotSDK(parent, new PanoSDKListenerWrap(parent.getContext(), listener));
+        return initPanoView(parent, false, listener);
+    }
+
+    /**
+     * 初始化
+     *
+     * @param lensProtected 是否使用保护镜
+     */
+    public static PilotSDK initPanoView(ViewGroup parent, boolean lensProtected, PanoSDKListener listener) {
+        return new PilotSDK(parent, lensProtected, listener);
     }
 
     public static int getCameraModuleCount() {
         return PilotSDK.CAMERA_COUNT;
-    }
-
-    /**
-     * 设置预览模式
-     *
-     * @param mode          预览模式
-     * @param playAnimation 切换预览模式的时候是否播放动画
-     */
-    private static void setPreviewMode(@PiPreviewMode int mode, boolean playAnimation) {
-        PilotSDK.setPreviewMode(mode, 0, playAnimation, 0, 0);
-    }
-
-    public static void setPreviewMode(@PiPreviewMode int mode) {
-        PilotSDK.setPreviewMode(mode, 0, false, 0, 0);
     }
 
     /**
@@ -150,21 +138,7 @@ public class PreviewWrap {
      * 设置曝光时间
      */
     public static void setExposeTime(@PiExposureTime int value) {
-        setExposeTime(value, null);
-    }
-
-    /**
-     * 设置曝光时间
-     */
-    public static void setExposeTime(@PiExposureTime int value, IExposeTimeAdjustFinish adjustFinish) {
         PilotSDK.setExposeTime(value);
-        if (null != adjustFinish) {
-            // 等候曝光时间模式修改完成
-            new Thread(() -> {
-                ExposeTimeAdjustHelper.waitAdjustFinish();
-                adjustFinish.onAdjustFinish();
-            }, "ExposeTimeAdjustFinish").start();
-        }
     }
 
     /**
@@ -189,6 +163,14 @@ public class PreviewWrap {
     }
 
     /**
+     * 设置抗频闪
+     */
+    public static void setAntiMode(@PiAntiMode String mode) {
+        PilotSDK.setAntiMode(mode);
+    }
+
+
+    /**
      * 设置拼接距离。
      * 拍照及实时视频生成文件时再次计算拼接距离与此设置无关。
      *
@@ -211,12 +193,35 @@ public class PreviewWrap {
         PilotSDK.setParamReCaliEnable(-1, true);
     }
 
-    public static boolean changeCameraResolution(int[] params, @NonNull DefaultChangeResolutionListener listener) {
-        int[] cur = PilotSDK.getCameraResolution();
-        boolean same = isSameCameraParams(params, cur);
-        listener.mWidth = params[0];
-        listener.mHeight = params[1];
-        listener.mFps = params[2];
+    private static boolean isSameCameraParams(int[] cameraParams, int[] cur) {
+        if (cur != null) {
+            return Arrays.equals(cameraParams, cur);
+        }
+        return false;
+    }
+
+    /**
+     * 分辨率切换
+     *
+     * @param params   分辨率参数
+     * @param listener 监听
+     * @return 分辨率是否将改变
+     */
+    public static boolean changeResolution(@NonNull ResolutionParams params, @NonNull DefaultChangeResolutionListener listener) {
+        Log.d(TAG, "change resolution:" + params);
+        int[] cameraParams = params.resolutions;
+        if (cameraParams.length == 3) {
+            cameraParams = new int[4];
+            System.arraycopy(params.resolutions, 0, cameraParams, 0, 3);
+            // 默认摄像头使用全景
+            cameraParams[3] = 2;
+        }
+        return changeResolutionInner(cameraParams, params.forceChange, listener);
+    }
+
+    private static boolean changeResolutionInner(int[] cameraParams, boolean force, @NonNull DefaultChangeResolutionListener listener) {
+        boolean same = !force && isSameCameraParams(cameraParams, PilotSDK.getCameraResolution());
+        listener.fillParams(cameraParams[3] != -1 ? String.valueOf(cameraParams[3]) : null, cameraParams[0], cameraParams[1], cameraParams[2]);
         if (same) {
             listener.onCheckResolution(true);
             return false;
@@ -224,245 +229,9 @@ public class PreviewWrap {
             listener.onCheckResolution(false);
         }
         listener.changeSurfaceViewSize(() -> {
-            PilotSDK.changeCameraResolution(params, false, listener);
+            PilotSDK.changeCameraResolution(force, listener);
         });
         return true;
-    }
-
-    private static boolean isSameCameraParams(int[] params, int[] cur) {
-        if (cur != null) {
-            return Arrays.equals(params, cur);
-        }
-        return false;
-    }
-
-    /**
-     * 后拼接录像分辨率设置
-     *
-     * @param resolution 录像输出分辨率
-     * @param fps        录像输出帧率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForFishEyeVideo(@PiVideoResolution String resolution, String fps,
-                                                                @Nullable DefaultChangeResolutionListener listener) {
-        int[] params1 = null;
-        switch (resolution) {
-            case PiVideoResolution._5_7K:
-                if ("30".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_30;
-                } else if ("25".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_25;
-                } else if ("24".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_24;
-                }
-                break;
-            case PiVideoResolution._4K:
-                if ("60".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_60;
-                } else if ("30".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_30;
-                } else if ("25".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_25;
-                } else if ("24".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_24;
-                }
-                break;
-            case PiVideoResolution._2_5K:
-                if ("110".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_110;
-                } else if ("90".equals(fps)) {
-                    params1 = PilotSDK.CAMERA_PREVIEW_640_320_90;
-                }
-                break;
-        }
-        if (null == params1) {
-            throw new RuntimeException("VideoResolution don't support:" + resolution);
-        }
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleChangeResolutionListener();
-        }
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 实时录像分辨率设置
-     *
-     * @param resolution 录像输出分辨率
-     * @param fps        录像输出帧率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForStitchVideo(@PiVideoResolution String resolution, String fps,
-                                                               @Nullable DefaultChangeResolutionListener listener) {
-        throw new RuntimeException("VideoResolution don't support:" + resolution + ",fps:" + fps);
-    }
-
-    /**
-     * 平面视频分辨率设置
-     *
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForPlaneVideo(boolean front, @PiVideoResolution String resolution, String fps,
-                                                              int fieldOfView, String aspectRatio,
-                                                              @Nullable DefaultPlaneChangeResolutionListener listener) {
-        int[] params1;
-        if ("24".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_3040_3040_24;
-        } else if ("25".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_3040_3040_25;
-        } else if ("30".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_3040_3040_30;
-        } else if ("60".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_3040_3040_60;
-        } else {
-            throw new RuntimeException("VideoResolution don't support:" + resolution + ",fps:" + fps);
-        }
-        int cameraId = front ? 0 : 1;
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = cameraId; // 摄像头使用单镜头
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SamplePlaneChangeResolutionListener(fieldOfView, aspectRatio);
-        }
-        listener.mCameraId = String.valueOf(cameraId);
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 慢动作
-     *
-     * @param resolution 录像分辨率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForSlowMotionVideo(@PiVideoResolution String resolution, String fps,
-                                                                   @Nullable DefaultChangeResolutionListener listener) {
-        int[] params1 = PilotSDK.CAMERA_PREVIEW_640_320_110;
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleChangeResolutionListener();
-        }
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 录像（延时摄影）分辨率设置
-     *
-     * @param resolution 录像分辨率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForTimeLapseVideo(@PiVideoResolution String resolution, String fps,
-                                                                  @Nullable DefaultChangeResolutionListener listener) {
-        int[] params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_30;
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleChangeResolutionListener();
-        }
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 录像（街景）分辨率设置
-     *
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForStreetViewVideo(@PiVideoResolution String resolution, String fps,
-                                                                   @Nullable DefaultStreetVideoChangeResolutionListener listener) {
-        int[] params1;
-        if ("3".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_15;
-        } else if ("4".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_16;
-        } else if ("7".equals(fps) || "2".equals(fps) || "1".equals(fps)) {
-            params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_14;
-        } else {
-            throw new RuntimeException("VideoResolution don't support:" + resolution + ",fps:" + fps);
-        }
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleStreetVideoResolutionListener();
-        }
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 拍照分辨率设置
-     *
-     * @param resolution 拍照分辨率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForPhoto(@PiPhotoResolution String resolution,
-                                                         @Nullable DefaultChangeResolutionListener listener) {
-        if (!PiPhotoResolution._5_7K.equals(resolution)) {
-            throw new RuntimeException("PiPhotoResolution don't support:" + resolution);
-        }
-        int[] params1 = PilotSDK.CAMERA_PREVIEW_1920_960_30;
-
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleChangeResolutionListener();
-        }
-        listener.isPhoto = true;
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 直播分辨率设置
-     *
-     * @param resolution 直播分辨率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForLive(@PiPushResolution String resolution, String fps,
-                                                        @Nullable DefaultLiveChangeResolutionListener listener) {
-        int[] params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_30;
-        int fpsInt;
-        try {
-            fpsInt = Integer.parseInt(fps);
-        } catch (NumberFormatException ignore) {
-            fpsInt = PilotSDK.CAMERA_PREVIEW_5760_2880_30[2];
-        }
-        params1[2] = fpsInt;
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleLiveResolutionListener();
-        }
-        return changeCameraResolution(params, listener);
-    }
-
-    /**
-     * 屏幕直播分辨率设置
-     *
-     * @param resolution 直播分辨率
-     * @return 分辨率是否将改变
-     */
-    public static boolean changeCameraResolutionForScreenLive(@PiPushResolution String resolution, String fps, String aspectRatio,
-                                                              @Nullable DefaultScreenLiveChangeResolutionListener listener) {
-        int[] params1 = PilotSDK.CAMERA_PREVIEW_5760_2880_30;
-        int fpsInt;
-        try {
-            fpsInt = Integer.parseInt(fps);
-        } catch (NumberFormatException ignore) {
-            fpsInt = PilotSDK.CAMERA_PREVIEW_5760_2880_30[2];
-        }
-        params1[2] = fpsInt;
-        int[] params = new int[params1.length + 1];
-        params[params1.length] = 2; // 摄像头使用全景
-        System.arraycopy(params1, 0, params, 0, params1.length);
-        if (null == listener) {
-            listener = new SampleScreenLiveResolutionListener(aspectRatio);
-        }
-        return changeCameraResolution(params, listener);
     }
 
     /**
@@ -480,9 +249,9 @@ public class PreviewWrap {
     }
 
     /**
-     * 是否使用镜头保护镜
+     * set lens protectors.
      */
-    public static void setLensProtectedEnabled(boolean enabled) {
-        PilotSDK.setLensProtectedEnabled(enabled);
+    public static void setLensProtected(boolean enabled) {
+        PilotSDK.setLensProtected(enabled);
     }
 }

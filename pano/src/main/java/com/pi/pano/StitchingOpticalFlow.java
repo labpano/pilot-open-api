@@ -42,8 +42,6 @@ public class StitchingOpticalFlow {
      */
     public static void stitchJpegFile(String unstitchedFilename, String stitchedFilename,
                                       boolean useOpticalFlow, int quality) {
-        stitchJpegFile(unstitchedFilename, stitchedFilename, useOpticalFlow,
-                SystemPropertiesProxy.getInt("persist.dev.pano.lens_protected", 0) > 0,
-                quality);
+        stitchJpegFile(unstitchedFilename, stitchedFilename, useOpticalFlow, false, quality);
     }
 }

@@ -20,4 +20,9 @@ public class DefaultStreetVideoChangeResolutionListener extends DefaultChangeRes
         PilotSDK.setLensCorrectionMode(0x11);
         PilotSDK.setPreviewMode(PiPreviewMode.planet, 180, false, fieldOfView, 0);
     }
+
+    @Override
+    protected boolean isLockDefaultPreviewFps() {
+        return false;
+    }
 }

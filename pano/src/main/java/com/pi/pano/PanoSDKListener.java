@@ -33,7 +33,6 @@ public interface PanoSDKListener {
 
     /**
      * frame rate,
-     * (当前定时触发此回调)
      */
     void onEncodeFrame(int count);
 }

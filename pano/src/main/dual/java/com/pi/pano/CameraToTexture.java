@@ -18,19 +18,23 @@ import android.hardware.camera2.DngCreator;
 import android.hardware.camera2.TotalCaptureResult;
 import android.location.Location;
 import android.location.LocationManager;
+import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.text.TextUtils;
 import android.util.Log;
 import android.util.Range;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
 
+import com.pi.pano.annotation.PiAntiMode;
 import com.pi.pano.annotation.PiExposureCompensation;
 import com.pi.pano.annotation.PiExposureTime;
 import com.pi.pano.annotation.PiIso;
-import com.pi.pano.annotation.PiPhotoFileFormat;
 import com.pi.pano.annotation.PiWhiteBalance;
+import com.pi.pano.wrap.ProParams;
+import com.pi.pilot.pano.sdk.BuildConfig;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,9 +43,10 @@ import java.util.List;
 class CameraToTexture {
     private static final String TAG = "CameraToTexture";
     private static final int CONTROL_AE_EXPOSURE_COMPENSATION_STEP = 3;
+    private static final String REQUEST_TAG_HDR_DNG_RAW = "hdr_dng_raw";
 
     private final Context mContext;
-    private CameraCaptureSession mPreviewSession;
+    private CameraCaptureSession mCameraSession;
     private CameraDevice mCameraDevice;
     private CaptureRequest.Builder mPreviewBuilder;
     private Handler mBackgroundHandler;
@@ -50,15 +55,9 @@ class CameraToTexture {
     private final SurfaceTexture mPreviewSurfaceTexture;
     private final PiPano mPiPano;
     private CameraCharacteristics mCameraCharacteristics;
-    private String mCameraId;
-    private int mFps;
-    private int mWidth;
-    private int mHeight;
-    /**
-     * true: 图片 ,false: 视频
-     */
-    private boolean mIsPhoto;
-    private boolean mNotUseDefaultFps;
+    private CameraEnvParams mCameraEnvParams;
+    private long mActualExposureTime = -1;
+    private int mActualSensitivity = -1;
 
     private int mExposeMode = CaptureRequest.CONTROL_AE_MODE_ON;
     @PiExposureTime
@@ -69,6 +68,8 @@ class CameraToTexture {
     private int mISO = PiIso._100;
     @PiWhiteBalance
     private String mWb = PiWhiteBalance.auto;
+    @PiAntiMode
+    private String mAntiMode = PiAntiMode.auto;
 
     /**
      * 测光模式.
@@ -78,8 +79,17 @@ class CameraToTexture {
     @SuppressLint("NewApi")
     public static final CaptureRequest.Key<Integer> METERING_MODE = new CaptureRequest.Key<>("org.codeaurora.qcamera3.exposure_metering.exposure_metering_mode", int.class);
 
-    private ImageProcess mImageProcess;
-    private ImageProcess mDngImageProcess;
+    private ImageReader mJpegImageReader;
+    private ImageReader mRawImageReader;
+
+    /**
+     * 是否锁定默认预览帧率
+     */
+    private boolean mLockDefaultPreviewFps = true;
+    /**
+     * 预览时，需要准备的图像格式
+     */
+    private int[] mPreviewImageReaderFormat;
 
     CameraToTexture(Context context, int index, SurfaceTexture surfaceTexture, PiPano piPano) {
         mContext = context.getApplicationContext();
@@ -92,42 +102,53 @@ class CameraToTexture {
         if (null == mCameraDevice) {
             return 0;
         }
-        return mWidth;
+        return mCameraEnvParams.getWidth();
     }
 
     int getPreviewHeight() {
         if (null == mCameraDevice) {
             return 0;
         }
-        return mHeight;
+        return mCameraEnvParams.getHeight();
     }
 
     int getPreviewFps() {
         if (null == mCameraDevice) {
             return 0;
         }
-        return mFps;
+        return mCameraEnvParams.getFps();
     }
 
     String getCameraId() {
         if (null == mCameraDevice) {
             return null;
         }
-        return mCameraId;
+        return mCameraEnvParams.getCameraId();
     }
 
-    /**
-     * 摄像头创建监听
-     */
-    private final CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
+    CameraEnvParams getCameraEnvParams() {
+        if (null == mCameraDevice) {
+            return null;
+        }
+        return mCameraEnvParams;
+    }
+
+    private final CameraDevice.StateCallback mStateCallback = new InnerCameraStateCallback() {
         @Override
-        public void onOpened(CameraDevice camera) {//打开摄像头
-            mCameraDevice = camera;
+        public void onOpened(CameraDevice camera) {
+            super.onOpened(camera);
             startPreview();
+        }
+    };
+
+    private class InnerCameraStateCallback extends CameraDevice.StateCallback {
+        @Override
+        public void onOpened(CameraDevice camera) {
+            mCameraDevice = camera;
         }
 
         @Override
-        public void onDisconnected(CameraDevice cameraDevice) {//关闭摄像头
+        public void onDisconnected(CameraDevice cameraDevice) {
             cameraDevice.close();
             mCameraDevice = null;
         }
@@ -137,15 +158,31 @@ class CameraToTexture {
             cameraDevice.close();
             mCameraDevice = null;
         }
-    };
+    }
+
+    private abstract class InnerCaptureSessionStateCallback extends CameraCaptureSession.StateCallback {
+        @Override
+        public void onConfigured(@NonNull CameraCaptureSession session) {
+            mCameraSession = session;
+        }
+    }
+
+    private class InnerCaptureCallback extends CameraCaptureSession.CaptureCallback {
+
+        @Override
+        public void onCaptureBufferLost(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull Surface target, long frameNumber) {
+        }
+    }
 
     /**
      * Starts a background thread and its {@link Handler}.
      */
     private void startBackgroundThread() {
-        mBackgroundThread = new HandlerThread("CameraBackground");
-        mBackgroundThread.start();
-        mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+        if (mBackgroundThread == null) {
+            mBackgroundThread = new HandlerThread("CameraBackground");
+            mBackgroundThread.start();
+            mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+        }
     }
 
     /**
@@ -165,48 +202,99 @@ class CameraToTexture {
     }
 
     @SuppressWarnings("MissingPermission")
-    void openCamera(String cameraId, int width, int height, int fps, boolean isPhoto, boolean notUseDefaultFps) {
-        Log.i(TAG, "openCamera :" + cameraId + "," + width + "*" + height + ",fps: " + fps + ",isPhoto:" + isPhoto);
+    void checkOrOpenCamera(String cameraId, int width, int height, int fps, boolean forceChange) {
         if (cameraId == null) {
             cameraId = "2";
         }
-        mCameraId = cameraId;
-        mWidth = width;
-        mHeight = height;
-        mFps = fps;
-        mIsPhoto = isPhoto;
-        mNotUseDefaultFps = notUseDefaultFps;
+        String lastCameraId = mCameraEnvParams == null ? null : mCameraEnvParams.getCameraId();
+
+        boolean initCamera = mCameraDevice == null || TextUtils.isEmpty(lastCameraId);
+        boolean switchCamera = !TextUtils.isEmpty(lastCameraId) && !TextUtils.equals(lastCameraId, cameraId);
+        boolean openCamera = initCamera || switchCamera;
+
+        String captureMode = mPreviewImageReaderFormat == null ?
+                CameraEnvParams.CAPTURE_STREAM : CameraEnvParams.CAPTURE_PHOTO;
+        boolean switchCapture = false;
+        boolean sizeChanged = true;
+        boolean fpsChanged = true;
+        if (mCameraEnvParams == null) {
+            mCameraEnvParams = new CameraEnvParams(cameraId, width, height, fps, captureMode);
+        } else {
+            sizeChanged = width != mCameraEnvParams.getWidth() || height != mCameraEnvParams.getHeight();
+            fpsChanged = fps != mCameraEnvParams.getFps();
+            mCameraEnvParams.setCameraId(cameraId);
+            mCameraEnvParams.setSize(width, height);
+            mCameraEnvParams.setFps(fps);
+            switchCapture = !captureMode.equals(mCameraEnvParams.getCaptureMode());
+            mCameraEnvParams.setCaptureMode(captureMode);
+        }
+        Log.i(TAG, "checkOrOpenCamera initCamera:" + initCamera + ",switchCamera:" + switchCamera +
+                ",switchCapture:" + switchCapture + ",sizeChanged:" + sizeChanged +
+                ",forceChange:" + forceChange + ",fpsChanged:" + fpsChanged + " ,result ==> " + mCameraEnvParams);
+        if (switchCamera) {
+            releaseCamera();
+        }
         updateHighPreviewSize();
         startBackgroundThread();
-        CameraManager cameraManager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
-        try {
-            mCameraCharacteristics = cameraManager.getCameraCharacteristics(mCameraId);
-            cameraManager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
+        if (openCamera) {
+            CameraManager cameraManager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
+            try {
+                mCameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId);
+                cameraManager.openCamera(cameraId, mStateCallback, mBackgroundHandler);
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
+        } else {
+            boolean useDefaultFps = mLockDefaultPreviewFps || mCameraEnvParams.getWidth() == mCameraEnvParams.getHeight();
+            fpsChanged = fpsChanged && !useDefaultFps;
+            if (switchCapture || sizeChanged || forceChange || fpsChanged) {
+                startPreview();
+                return;
+            }
+            try {
+                setCaptureRequestParam(mPreviewBuilder, true);
+                updatePreview();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
-    void setCaptureRequestParam(CaptureRequest.Builder previewBuilder, boolean isPreview) {
-        previewBuilder.set(METERING_MODE, metering);
-        int realFps = (isPreview && !mNotUseDefaultFps) ? 30 : mFps;
-        previewBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(realFps, realFps));
-        if (mExposeMode == CaptureRequest.CONTROL_AE_MODE_ON) {
-            previewBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            previewBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, mExposureCompensation * CONTROL_AE_EXPOSURE_COMPENSATION_STEP);
-        } else {
-            previewBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, mISO);
-            previewBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, 1_000_000_000L / mExposeTime);
-            previewBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+    void setCaptureRequestParam(CaptureRequest.Builder builder, boolean isPreview) {
+        builder.set(METERING_MODE, metering);
+        int realFps = getRealFps(isPreview);
+        builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(realFps, realFps));
+        if (mPiPano != null && isPreview) {
+            //预览帧率设置 ： 锁定默认预览帧率 或者 是平面视频时 才使用默认帧率
+            boolean useDefaultFps = mLockDefaultPreviewFps || mCameraEnvParams.getWidth() == mCameraEnvParams.getHeight();
+            mPiPano.setPreviewFps(useDefaultFps ? 30 : realFps);
         }
-        previewBuilder.set(CaptureRequest.CONTROL_AWB_MODE, ProUtils.convertRealWhiteBalance(mWb));
+        if (mExposeMode == CaptureRequest.CONTROL_AE_MODE_ON) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, mExposureCompensation * CONTROL_AE_EXPOSURE_COMPENSATION_STEP);
+            builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, ProUtils.convertRealAntiMode(mAntiMode));
+        } else {
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, mISO);
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, 1_000_000_000L / mExposeTime);
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+        }
+        builder.set(CaptureRequest.CONTROL_AWB_MODE, ProUtils.convertRealWhiteBalance(mWb));
+    }
+
+    void setCaptureRequestParamForHdr(CaptureRequest.Builder builder) {
+        builder.set(METERING_MODE, metering);
+        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+        builder.set(CaptureRequest.CONTROL_AWB_MODE, ProUtils.convertRealWhiteBalance(mWb));
+        builder.set(CaptureRequest.SENSOR_FRAME_DURATION, 1000000000L / 100);
     }
 
     void startPreview() {
         if (null == mCameraDevice) {
+            Log.w(TAG, "startPreview,camera devices is null.");
             return;
         }
         try {
+            mPiPano.skipFrameWithStartPreview = false;
             closePreviewSession();
             Surface previewSurface = new Surface(mPreviewSurfaceTexture);
             mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -214,23 +302,21 @@ class CameraToTexture {
 
             List<Surface> list = new ArrayList<>();
             list.add(previewSurface);
-            if (mIsPhoto) {
-                mImageProcess = new ImageProcess(5760, 2880, ImageFormat.JPEG);
-                mDngImageProcess = new ImageProcess(6080, 3040, ImageFormat.RAW_SENSOR);
-                list.add(mImageProcess.getImageReaderSurface());
-                list.add(mDngImageProcess.getImageReaderSurface());
+            if (mPreviewImageReaderFormat != null) {
+                checkImageReaderFormat(list);
             }
             setCaptureRequestParam(mPreviewBuilder, true);
-            mCameraDevice.createCaptureSession(list, new CameraCaptureSession.StateCallback() {
+            mCameraDevice.createCaptureSession(list, new InnerCaptureSessionStateCallback() {
 
                 @Override
-                public void onConfigured(CameraCaptureSession session) {
-                    mPreviewSession = session;
+                public void onConfigured(@NonNull CameraCaptureSession session) {
+                    super.onConfigured(session);
+                    mPiPano.skipFrameWithStartPreview = true;
                     updatePreview();
                 }
 
                 @Override
-                public void onConfigureFailed(CameraCaptureSession session) {
+                public void onConfigureFailed(@NonNull CameraCaptureSession session) {
                     Log.e(TAG, "onConfigureFailed");
                 }
             }, mBackgroundHandler);
@@ -243,33 +329,71 @@ class CameraToTexture {
      * Update the camera preview. {@link #startPreview()} needs to be called in advance.
      */
     private void updatePreview() {
-        if (null == mCameraDevice || null == mPreviewSession) {
+        if (null == mCameraDevice || null == mCameraSession) {
+            Log.w(TAG, "updatePreview,session isn't create");
             return;
         }
         try {
-            final boolean[] updatePreview = {true};
-            mPreviewSession.setRepeatingRequest(mPreviewBuilder.build(), new CameraCaptureSession.CaptureCallback() {
-                @Override
-                public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
-                    if (mIndex == 0) {
-                        mPiPano.nativeStabSetExposureDuration(result.get(CaptureResult.SENSOR_EXPOSURE_TIME));
-                    }
-                    if (updatePreview[0] && !mPiPano.isCaptureCompleted) {
-                        updatePreview[0] = false;
-                        mPiPano.isCaptureCompleted = true;
-                    }
-                    super.onCaptureCompleted(session, request, result);
-                }
-            }, mBackgroundHandler);
+            mCameraSession.setRepeatingRequest(mPreviewBuilder.build(), createPreviewCaptureCallback(), mBackgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
     }
 
+    @NonNull
+    private CameraCaptureSession.CaptureCallback createPreviewCaptureCallback() {
+        if (mPreviewImageReaderFormat != null) {
+            return new PreviewCaptureCallback2();
+        } else {
+            return new PreviewCaptureCallback();
+        }
+    }
+
+    private class PreviewCaptureCallback extends InnerCaptureCallback {
+        boolean updatePreview = true;
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+            if (mIndex == 0) {
+                Long duration = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
+                if (duration != null) {
+                    mPiPano.nativeStabSetExposureDuration(duration);
+                } else {
+                    Log.e(TAG, "onCaptureCompleted,result doesn't have SENSOR_EXPOSURE_TIME");
+                }
+            }
+            if (updatePreview && !mPiPano.isCaptureCompleted) {
+                updatePreview = false;
+                mPiPano.isCaptureCompleted = true;
+                mPiPano.mSkipFrameWithOpenCamera = 8;
+                if (BuildConfig.DEBUG) {
+                    mPiPano.mSkipFrameWithOpenCamera = SystemPropertiesProxy.getInt(
+                            "persist.dev.skip_frame_preview", mPiPano.mSkipFrameWithOpenCamera);
+                }
+                Log.d(TAG, "onCaptureCompleted set skipFrame :" + mPiPano.mSkipFrameWithOpenCamera);
+            }
+            if (updatePreview && mPiPano.skipFrameWithStartPreview) {
+                mPiPano.mSkipFrameWithStartPreview = 4;
+                mPiPano.skipFrameWithStartPreview = false;
+            }
+            super.onCaptureCompleted(session, request, result);
+        }
+    }
+
+    private class PreviewCaptureCallback2 extends PreviewCaptureCallback {
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+            super.onCaptureCompleted(session, request, result);
+            mActualExposureTime = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
+            mActualSensitivity = result.get(CaptureResult.SENSOR_SENSITIVITY);
+        }
+    }
+
     private void closePreviewSession() {
-        if (mPreviewSession != null) {
-            mPreviewSession.close();
-            mPreviewSession = null;
+        if (mCameraSession != null) {
+            mCameraSession.close();
+            mCameraSession = null;
         }
     }
 
@@ -279,14 +403,13 @@ class CameraToTexture {
             mCameraDevice.close();
             mCameraDevice = null;
         }
-
         if (mBackgroundHandler != null) {
             mBackgroundHandler.removeCallbacksAndMessages(null);
             mBackgroundHandler = null;
         }
-
         stopBackgroundThread();
 
+        mPiPano.isCaptureCompleted = false;
         Log.i(TAG, "release camera");
     }
 
@@ -337,7 +460,24 @@ class CameraToTexture {
     void setAutoWhiteBalanceLock(boolean value) {
     }
 
-    void startRecord(Surface surface) {
+    void setAntiMode(String value) {
+        mAntiMode = value;
+        if (null == mCameraDevice || null == mPreviewBuilder) {
+            return;
+        }
+        mPreviewBuilder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, ProUtils.convertRealAntiMode(value));
+        updatePreview();
+    }
+
+    public void setLockDefaultPreviewFps(boolean value) {
+        this.mLockDefaultPreviewFps = value;
+    }
+
+    public void setPreviewImageReaderFormat(int[] values) {
+        this.mPreviewImageReaderFormat = values;
+    }
+
+    void startCapture(Surface surface) {
         if (null == mCameraDevice) {
             return;
         }
@@ -357,7 +497,7 @@ class CameraToTexture {
 
                 @Override
                 public void onConfigured(CameraCaptureSession cameraCaptureSession) {
-                    mPreviewSession = cameraCaptureSession;
+                    mCameraSession = cameraCaptureSession;
                     updatePreview();
                 }
 
@@ -370,8 +510,8 @@ class CameraToTexture {
         }
     }
 
-    void stopRecord() {
-        if (mBackgroundHandler != null) {
+    void stopCapture(boolean sync) {
+        if (sync && mBackgroundHandler != null) {
             mBackgroundHandler.post(this::startPreview);
         } else {
             startPreview();
@@ -379,8 +519,9 @@ class CameraToTexture {
     }
 
     public void updateHighPreviewSize() {
-        int[] sizeInIdle = getPreviewSizeInIdle(mWidth, mHeight, mNotUseDefaultFps);
-        Log.d(TAG, "updateHighPreviewSize :" + Arrays.toString(sizeInIdle));
+        int[] sizeInIdle = getPreviewSizeInIdle();
+        Log.d(TAG, "updateHighPreviewSize :" + mCameraEnvParams.getWidth() + "x"
+                + mCameraEnvParams.getHeight() + " ==> " + Arrays.toString(sizeInIdle));
         mPreviewSurfaceTexture.setDefaultBufferSize(sizeInIdle[0], sizeInIdle[1]);
     }
 
@@ -390,81 +531,292 @@ class CameraToTexture {
         mPreviewSurfaceTexture.setDefaultBufferSize(sizeInIdle[0], sizeInIdle[1]);
     }
 
-    void takePhoto(int hdrIndex, TakePhotoListener listener) {
+    void takePhoto(TakePhotoListener listener) {
         if (null == mCameraDevice) {
             return;
         }
-        final ImageProcess localImageProcess = mImageProcess;
-        final ImageProcess localDngImageProcess = mDngImageProcess;
-        try {
-            localImageProcess.setHdrIndex(hdrIndex);
-            localImageProcess.setTakePhotoListener(listener);
-            localImageProcess.start();
-            if (listener.mImageFormat == ImageFormat.RAW_SENSOR && hdrIndex <= 0) {
-                localDngImageProcess.setTakePhotoListener(listener);
-                localDngImageProcess.setHdrIndex(hdrIndex);
-                localDngImageProcess.start();
-            }
-            if (listener.mHDRImageCount > 0) {
-                takePhotoCore(localImageProcess, localDngImageProcess, listener, mPreviewSession);
-            }
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-            listener.dispatchTakePhotoComplete(-2);
+        if (listener.mParams.isHdr()) {
+            takePhotoForHdr(listener, mCameraSession);
+            return;
         }
-        if (listener.mHDRImageCount <= 0) {
-            mBackgroundHandler.post(() -> {
+        final ImageProcess jpegImageProcess = new ImageProcess(listener, mJpegImageReader, false); // jpeg
+        final ImageProcess rawImageProcess;
+        if (listener.mImageFormat == ImageFormat.RAW_SENSOR) {
+            rawImageProcess = new ImageProcess(listener, mRawImageReader, false); // raw
+        } else {
+            rawImageProcess = null;
+        }
+        PiPano.recordOnceJpegInfo(mExposeTime, mExposureCompensation, mISO, PiWhiteBalance.auto.equals(mWb) ? 0 : 1);
+        mBackgroundHandler.post(new Runnable() {
+            @Override
+            public void run() {
                 try {
-                    takePhotoCore(localImageProcess, localDngImageProcess, listener, mPreviewSession);
-                } catch (CameraAccessException e) {
-                    e.printStackTrace();
+                    CaptureRequest.Builder stillCapture = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                    stillCapture.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE);
+                    setCaptureRequestParam(stillCapture, false);
+                    fillExtInfo(stillCapture);
+                    stillCapture.set(CaptureRequest.JPEG_QUALITY, (byte) 100);
+                    //
+                    stillCapture.addTarget(new Surface(mPreviewSurfaceTexture));
+                    stillCapture.addTarget(mJpegImageReader.getSurface());
+                    if (null != rawImageProcess) {
+                        stillCapture.addTarget(mRawImageReader.getSurface());
+                    }
+                    //
+                    mCameraSession.capture(stillCapture.build(), new CameraCaptureSession.CaptureCallback() {
+                        @Override
+                        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                            super.onCaptureCompleted(session, request, result);
+                            if (null != rawImageProcess) {
+                                if (rawImageProcess.needDng()) {
+                                    DngCreator dngCreator = new DngCreator(mCameraCharacteristics, result);
+                                    rawImageProcess.setDngCreator(dngCreator);
+                                }
+                            }
+                        }
+
+                        @Override
+                        public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
+                            super.onCaptureFailed(session, request, failure);
+                            Log.e(TAG, "takePhoto,onCaptureFailed,reason:" + failure.getReason());
+                            endCapture();
+                            listener.dispatchTakePhotoComplete(-2);
+                        }
+                    }, mBackgroundHandler);
+                } catch (CameraAccessException ex) {
+                    Log.e(TAG, "takePhoto,ex:" + ex);
+                    ex.printStackTrace();
+                    endCapture();
                     listener.dispatchTakePhotoComplete(-2);
                 }
-                startPreview();
-            });
-        } else {
-            startPreview();
-        }
+            }
+
+            private void endCapture() {
+                jpegImageProcess.aborted();
+                if (rawImageProcess != null) {
+                    rawImageProcess.aborted();
+                }
+            }
+        });
     }
 
-    private void takePhotoCore(ImageProcess imageProcess, ImageProcess dngImageProcess,
-                               TakePhotoListener listener, CameraCaptureSession cameraCaptureSession) throws CameraAccessException {
-        CaptureRequest.Builder captureRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-        Surface previewSurface = new Surface(mPreviewSurfaceTexture);
-        captureRequestBuilder.addTarget(previewSurface);
-        captureRequestBuilder.addTarget(imageProcess.getImageReaderSurface());
-        captureRequestBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 100);
-        if (null != dngImageProcess) {
-            captureRequestBuilder.addTarget(dngImageProcess.getImageReaderSurface());
+    private void takePhotoForHdr(TakePhotoListener listener, CameraCaptureSession cameraCaptureSession) {
+        takePhotoForHdrInner(listener, cameraCaptureSession, null);
+    }
+
+
+    /**
+     * hdr拍照
+     *
+     * @param listener 监听
+     */
+    private void takePhotoForHdrInner(TakePhotoListener listener, CameraCaptureSession cameraCaptureSession, ProParams lastProParams) {
+        if (null == mCameraDevice) {
+            return;
         }
-        setCaptureRequestParam(captureRequestBuilder, false);
-        //TODO recordOnceJpegInfo的作用是,告诉底层记录一次相机姿态,以用于拍照画面水平,但是在这里调用的话,
-        // 记录的姿态的时间戳要比实际曝光的时间戳早1~2秒,如果相机这是在运动的话,拍照会不水平,以后优化
-        PiPano.recordOnceJpegInfo(listener.hdr_exposureTime, listener.hdr_ev, listener.hdr_iso, listener.hdr_wb);
-        addPhotoExifInfo(captureRequestBuilder);
-        cameraCaptureSession.capture(captureRequestBuilder.build(), new CameraCaptureSession.CaptureCallback() {
+        final HdrImageProcess jpegImageProcess = new HdrImageProcess(listener, mJpegImageReader); // jpeg
+        final ImageProcess rawImageProcess;
+        if (listener.mImageFormat == ImageFormat.RAW_SENSOR) {
+            rawImageProcess = new ImageProcess(listener, mRawImageReader, false); // raw
+        } else {
+            rawImageProcess = null;
+        }
+        PiPano.recordOnceJpegInfo(mActualExposureTime == 0 ? 0 : (int) (1_000_000_000L / mActualExposureTime), mExposureCompensation, mActualSensitivity, PiWhiteBalance.auto.equals(mWb) ? 0 : 1);
+        int delay = 0;
+        if (mActualExposureTime == -1 || mActualSensitivity == -1) {
+            delay = 1500;
+        }
+        Log.d(TAG, "takePhotoForHdrInner exTime: " + mActualExposureTime + ", iso:" + mActualExposureTime);
+        mBackgroundHandler.postDelayed(new Runnable() {
             @Override
-            public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
-                super.onCaptureCompleted(session, request, result);
-                if (null != dngImageProcess) {
-                    if (PiPhotoFileFormat.jpg_dng.equals(listener.mFileFormat)) {
-                        DngCreator dngCreator = new DngCreator(mCameraCharacteristics, result);
-                        dngImageProcess.setDngCreator(dngCreator);
+            public void run() {
+                try {
+                    CaptureRequest.Builder stillCapture = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+                    stillCapture.set(CaptureRequest.CONTROL_CAPTURE_INTENT, CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE);
+                    setCaptureRequestParamForHdr(stillCapture);
+                    fillExtInfo(stillCapture);
+                    stillCapture.set(CaptureRequest.JPEG_QUALITY, (byte) 100);
+                    stillCapture.set(CaptureRequest.SENSOR_SENSITIVITY, mActualSensitivity);
+                    //
+                    stillCapture.addTarget(new Surface(mPreviewSurfaceTexture));
+                    stillCapture.addTarget(mJpegImageReader.getSurface());
+                    //
+                    List<CaptureRequest> requests = new ArrayList<>();
+                    {
+                        Range<Long> exposure_time_range = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                        long min_exposure_time = exposure_time_range.getLower();
+                        long max_exposure_time = exposure_time_range.getUpper();
+                        Log.d(TAG, "takePhotoForHdr,ActualExposureTime:" + mActualExposureTime + ",ActualSensitivity:" + mActualSensitivity);
+                        long[] dst_exposure_times = HdrExposureTimeCalculator.getExposureTimes(listener.mParams.hdrCount, mActualExposureTime);
+                        for (int pos = 0; pos < dst_exposure_times.length; pos++) {
+                            long dst_exposure_time = dst_exposure_times[pos];
+                            if (dst_exposure_time < min_exposure_time) {
+                                dst_exposure_time = min_exposure_time;
+                            }
+                            if (dst_exposure_time > max_exposure_time) {
+                                dst_exposure_time = max_exposure_time;
+                            }
+                            stillCapture.set(CaptureRequest.SENSOR_EXPOSURE_TIME, dst_exposure_time);
+                            Log.d(TAG, "takePhotoForHdr,[" + pos + "] dst_exposure_time:" + dst_exposure_time);
+                            if (rawImageProcess != null) {
+                                if (pos == dst_exposure_times.length / 2) {
+                                    stillCapture.setTag(REQUEST_TAG_HDR_DNG_RAW);
+                                    Surface surface = mRawImageReader.getSurface();
+                                    stillCapture.addTarget(surface);
+                                    requests.add(stillCapture.build());
+                                    // 清除
+                                    stillCapture.setTag(null);
+                                    stillCapture.removeTarget(surface);
+                                    continue;
+                                }
+                            }
+                            requests.add(stillCapture.build());
+                        }
                     }
+                    // control frame duration, enable，frame duration is 100ms
+                    SystemPropertiesProxy.set("vendor.camera.burst.mode", "1");
+                    cameraCaptureSession.captureBurst(requests, new InnerCaptureCallback() {
+                        boolean captureFailed = false;
+
+                        @Override
+                        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                            super.onCaptureCompleted(session, request, result);
+                            if (rawImageProcess != null && REQUEST_TAG_HDR_DNG_RAW.equals(request.getTag())
+                                    && rawImageProcess.needDng()) {
+                                DngCreator dngCreator = new DngCreator(mCameraCharacteristics, result);
+                                rawImageProcess.setDngCreator(dngCreator);
+                            }
+                        }
+
+                        @Override
+                        public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
+                            super.onCaptureFailed(session, request, failure);
+                            Log.e(TAG, "takePhotoForHdr,onCaptureFailed,reason:" + failure.getReason());
+                            if (rawImageProcess != null && REQUEST_TAG_HDR_DNG_RAW.equals(request.getTag())) {
+                                rawImageProcess.aborted();
+                            }
+                            captureFailed = true;
+                            listener.onTakePhotoComplete(-2);
+                        }
+
+                        @Override
+                        public void onCaptureSequenceCompleted(@NonNull CameraCaptureSession session, int sequenceId, long frameNumber) {
+                            super.onCaptureSequenceCompleted(session, sequenceId, frameNumber);
+                            Log.d(TAG, "takePhotoForHdr,onCaptureSequenceCompleted");
+                            handleStackHdr(captureFailed);
+                        }
+
+                        @Override
+                        public void onCaptureSequenceAborted(@NonNull CameraCaptureSession session, int sequenceId) {
+                            super.onCaptureSequenceAborted(session, sequenceId);
+                            Log.e(TAG, "takePhotoForHdr,onCaptureSequenceAborted");
+                            endCapture();
+                            captureFailed = true;
+                            listener.onTakePhotoComplete(-2);
+                        }
+                    }, mBackgroundHandler);
+                } catch (Exception ex) {
+                    Log.e(TAG, "takePhotoForHdr,ex:" + ex);
+                    ex.printStackTrace();
+                    endCapture();
+                    listener.dispatchTakePhotoComplete(-2);
                 }
             }
 
-            @Override
-            public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
-                super.onCaptureFailed(session, request, failure);
-                Log.e(TAG, "onCaptureFailed: " + failure.getReason());
-                listener.dispatchTakePhotoComplete(-2);
+            private void endCapture() {
+                jpegImageProcess.aborted();
+                if (rawImageProcess != null) {
+                    rawImageProcess.aborted();
+                }
+                if (lastProParams != null) {
+                    setExposeTime(lastProParams.mExposeTime);
+                }
+                // control frame duration, unable，frame duration is normal
+                SystemPropertiesProxy.set("vendor.camera.burst.mode", "0");
             }
-        }, mBackgroundHandler);
+
+            // There is a memory requirement during HDR synthesis,
+            // which frees up excess surface output in camera and reduces screen preview before synthesis.
+            private void handleStackHdr(boolean hasCaptureFailed) {
+                // control frame duration, unable，frame duration is normal
+                SystemPropertiesProxy.set("vendor.camera.burst.mode", "0");
+                if (hasCaptureFailed) {
+                    return;
+                }
+                // first 修改预览为低清晰度
+                simplePreview(new InnerCaptureSessionStateCallback() {
+                    @Override
+                    public void onConfigured(@NonNull CameraCaptureSession session) {
+                        super.onConfigured(session);
+                        Log.d(TAG, "handleStackHdr simplePreview onConfigured :" + session);
+                        updatePreview();
+                        int errCode = jpegImageProcess.stackHdrConfigured();
+                        endStackHdr();
+                        listener.onTakePhotoComplete(errCode);
+                    }
+
+                    @Override
+                    public void onConfigureFailed(@NonNull CameraCaptureSession session) {
+                        listener.onTakePhotoComplete(-2);
+                        endStackHdr();
+                    }
+
+                    private void endStackHdr() {
+                        // end 还原高清预览
+                        updateHighPreviewSize();
+                        if (lastProParams != null) {
+                            mExposeTime = lastProParams.mExposeTime;
+                        }
+                        startPreview();
+                    }
+                });
+            }
+
+            private void simplePreview(CameraCaptureSession.StateCallback callback) {
+                closePreviewSession();
+                try {
+                    mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                    mPreviewSurfaceTexture.setDefaultBufferSize(640, 320);
+                    Surface previewSurface = new Surface(mPreviewSurfaceTexture);
+                    mPreviewBuilder.addTarget(previewSurface);
+                    List<Surface> list = new ArrayList<>();
+                    list.add(previewSurface);
+                    setCaptureRequestParam(mPreviewBuilder, true);
+                    mCameraDevice.createCaptureSession(list, callback, mBackgroundHandler);
+                } catch (CameraAccessException e) {
+                    e.printStackTrace();
+                }
+            }
+        }, delay);
     }
 
+    private void restoreAutoProParamsWithHdr(CameraCaptureSession.CaptureCallback listener) {
+        mPreviewBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+        try {
+            mCameraSession.setRepeatingRequest(mPreviewBuilder.build(), new PreviewCaptureCallback2() {
+                int updateResult = 0;
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                               @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+                    super.onCaptureCompleted(session, request, result);
+                    //After manual to automatic exposure, the exposure value and iso have changed, and the invalid data of the previous few frames are filtered.
+                    if (updateResult == 4 && listener != null) {
+                        listener.onCaptureCompleted(session, request, result);
+                    }
+                    updateResult++;
+                }
+            }, mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Fill in additional request information, including: location.
+     */
     @SuppressLint("MissingPermission")
-    private void addPhotoExifInfo(CaptureRequest.Builder captureRequestBuilder) {
+    private void fillExtInfo(CaptureRequest.Builder builder) {
         Location location = null;
         {
             LocationManager ls = (LocationManager) mContext.getSystemService(Context.LOCATION_SERVICE);
@@ -476,13 +828,38 @@ class CameraToTexture {
                 }
             }
         }
-        captureRequestBuilder.set(CaptureRequest.JPEG_GPS_LOCATION, location);
+        builder.set(CaptureRequest.JPEG_GPS_LOCATION, location);
     }
 
-    private int[] getPreviewSizeInIdle(int width, int height, boolean notUseDefault) {
-        if (width == height || notUseDefault) {
-            return new int[]{width, height};
+    private int[] getPreviewSizeInIdle() {
+        if (mCameraEnvParams.getWidth() == mCameraEnvParams.getHeight() || !mLockDefaultPreviewFps) {
+            return new int[]{mCameraEnvParams.getWidth(), mCameraEnvParams.getHeight()};
         }
         return PilotSDK.CAMERA_PREVIEW_3840_1920_30;
+    }
+
+    private int getRealFps(boolean isPreview) {
+        return (isPreview && mLockDefaultPreviewFps &&
+                mCameraEnvParams.getWidth() != mCameraEnvParams.getHeight()) ? 30 : mCameraEnvParams.getFps();
+    }
+
+    private void checkImageReaderFormat(List<Surface> list) {
+        boolean hasJpg = false;
+        boolean hasRaw = false;
+        for (int format : mPreviewImageReaderFormat) {
+            if (format == ImageFormat.JPEG) {
+                hasJpg = true;
+            } else if (format == ImageFormat.RAW_SENSOR) {
+                hasRaw = true;
+            }
+        }
+        if (hasJpg) {
+            mJpegImageReader = ImageReader.newInstance(5760, 2880, ImageFormat.JPEG, 1);
+            list.add(mJpegImageReader.getSurface());
+        }
+        if (hasRaw) {
+            mRawImageReader = ImageReader.newInstance(6080, 3040, ImageFormat.RAW_SENSOR, 1);
+            list.add(mRawImageReader.getSurface());
+        }
     }
 }

@@ -1,34 +1,30 @@
 package com.pi.pano;
 
 /**
- * Video post-processing monitoring can monitor the progress of video splicing.
+ * 视频后处理监听,可以监听视频拼接进度等
  */
 public interface StitchingListener {
     /**
-     * StitchingUtil.Task progress changes
+     * 当StitchingUtil.Task progress变化的时候,回调
      *
-     * @param task task of progress change
+     * @param task 状态变化的task
      */
     void onStitchingProgressChange(StitchingUtil.Task task);
 
     /**
-     * StitchingUtil.Task state changes
+     * 当StitchingUtil.Task state变化的时候,回调
      *
-     * @param task task of state change
+     * @param task 状态变化的task
      */
     void onStitchingStateChange(StitchingUtil.Task task);
 
     /**
-     * delete finish
-     *
-     * @param task affected task
+     * 拼接删除完成
      */
     void onStitchingDeleteFinish(StitchingUtil.Task task);
 
     /**
-     * delete start
-     *
-     * @param task affected task
+     * 拼接删除开始
      */
     void onStitchingDeleteDeleting(StitchingUtil.Task task);
 }
